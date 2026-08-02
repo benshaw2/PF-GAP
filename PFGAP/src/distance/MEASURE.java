@@ -40,6 +40,13 @@ public enum MEASURE {
 //	euclidean_d,
 //	manhattan_d,
 
+// missing-compatible distances
+	nan_euclidean_i,
+	nan_euclidean,
+	dtwarow,
+	dtwarow_i,
+	dtwarow_d,
+
 // Shape-based multivariate DTW
 	shapeHoGdtw, shifazShapeHoGDTW,
 

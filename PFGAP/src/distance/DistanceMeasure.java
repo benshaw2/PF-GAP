@@ -13,6 +13,7 @@ import distance.elastic.*;
 import distance.graph.*;
 import distance.interop.*;
 import distance.meta.*;
+import distance.missing.*;
 import distance.multiTS.*;
 
 public class DistanceMeasure implements Serializable {
@@ -58,6 +59,13 @@ public class DistanceMeasure implements Serializable {
 	private ShapeHoGDTW shapeHoGdtw_d;
 	//private Euclidean_D euclidean_d;
 	//private Manhattan_D manhattan_d;
+
+	// missing-compatible distances
+	private NaNEuclidean nan_euclidean;
+	private NaNEuclidean_I nan_euclidean_i;
+	private DTWAROW dtwarow;
+	private DTWAROW_I dtwarow_i;
+	private DTWAROW_D dtwarow_d;
 
 	//graph-based distances
 	private ApproximateGraphEditDistance approximateGraphEditDistance;
@@ -198,6 +206,21 @@ public class DistanceMeasure implements Serializable {
 			case shifazEUCLIDEAN_I:
 				euclidean_i = new Euclidean_I();
 				break;
+			case nan_euclidean_i:
+				nan_euclidean_i = new NaNEuclidean_I();
+				break;
+			case nan_euclidean:
+				nan_euclidean = new NaNEuclidean();
+				break;
+			case dtwarow:
+				dtwarow = new DTWAROW();
+				break;
+			case dtwarow_i:
+				dtwarow_i = new DTWAROW_I();
+				break;
+			case dtwarow_d:
+				dtwarow_d = new DTWAROW_D();
+				break;
 			case lcss_i:
 			case shifazLCSS_I:
 				lcss_i = new LCSS_I();
@@ -320,6 +343,16 @@ public class DistanceMeasure implements Serializable {
 				return dtw_i;
 			case dtw_d:
 				return dtw_d;
+			case nan_euclidean:
+				return nan_euclidean;
+			case nan_euclidean_i:
+				return nan_euclidean_i;
+			case dtwarow:
+				return dtwarow;
+			case dtwarow_i:
+				return dtwarow_i;
+			case dtwarow_d:
+				return dtwarow_d;
 			case ddtw_i:
 			case shifazDDTW_I:
 				return ddtw_i;
@@ -553,6 +586,21 @@ public class DistanceMeasure implements Serializable {
 			break;
 		case shapeHoG1dDTW:
 			distance = shapeHoG1dDTW.distance(s,t,bsf,((double[]) s).length);
+			break;
+		case nan_euclidean:
+			distance = nan_euclidean.distance(s,t,bsf);
+			break;
+		case nan_euclidean_i:
+			distance = nan_euclidean_i.distance(s,t,bsf);
+			break;
+		case dtwarow:
+			distance = dtwarow.distance(s,t,bsf);
+			break;
+		case dtwarow_i:
+			distance = dtwarow_i.distance(s,t,bsf);
+			break;
+		case dtwarow_d:
+			distance = dtwarow_d.distance(s,t,bsf);
 			break;
 		case dtw_i:
 			distance = dtw_i.distance(s,t,bsf,((double[][]) s).length);
