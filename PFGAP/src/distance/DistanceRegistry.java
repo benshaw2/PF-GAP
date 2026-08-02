@@ -91,6 +91,13 @@ public class DistanceRegistry {
         registry.put("shapeHoGdtw", MEASURE.shapeHoGdtw);
         registry.put("shifazShapeHoGDTW", MEASURE.shifazShapeHoGDTW);
 
+        // Missing-compatible distances
+        registry.put("nan_euclidean", MEASURE.nan_euclidean);
+        registry.put("nan_euclidean_i", MEASURE.nan_euclidean_i);
+        registry.put("dtwarow", MEASURE.dtwarow);
+        registry.put("dtwarow_i", MEASURE.dtwarow_i);
+        registry.put("dtwarow_d", MEASURE.dtwarow_d);
+
         // Graph-based distances
         registry.put("ApproximateGraphEditDistance", MEASURE.approximateGraphEditDistance);
         registry.put("GraphEditDistance", MEASURE.graphEditDistance);
