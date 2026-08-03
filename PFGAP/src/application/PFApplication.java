@@ -42,6 +42,74 @@ public class PFApplication {
 			"-target_column=first"	//first or last
             };
 
+	private static MEASURE[] parseMeasureList(
+			String raw,
+			String argumentName) {
+
+		if (raw == null) {
+			return new MEASURE[]{};
+		}
+
+		String trimmed = raw.trim();
+
+		if (trimmed.equals("[]")) {
+			return new MEASURE[]{};
+		}
+
+		if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+			throw new IllegalArgumentException(
+					"Invalid -" + argumentName
+							+ " format. Expected [distance1,distance2]."
+			);
+		}
+
+		String contents = trimmed.substring(1, trimmed.length() - 1).trim();
+
+		if (contents.isEmpty()) {
+			return new MEASURE[]{};
+		}
+
+		String[] names = contents.split(",");
+		MEASURE[] measures = new MEASURE[names.length];
+
+		for (int i = 0; i < names.length; i++) {
+			String name = names[i].trim();
+
+			if (!DistanceRegistry.contains(name)) {
+				throw new IllegalArgumentException(
+						"Unknown distance in -" + argumentName + ": "
+								+ name
+								+ ". Available distances: "
+								+ DistanceRegistry.getAll().keySet()
+				);
+			}
+
+			measures[i] = DistanceRegistry.get(name);
+
+			if (argumentName.equals("missing_proximity_distances")
+					&& !isMissingCompatibleDistance(measures[i])) {
+				throw new IllegalArgumentException(
+						"Distance "
+								+ name
+								+ " is not missing-compatible. Use one of: "
+								+ "nan_euclidean, nan_euclidean_i, "
+								+ "dtwarow, dtwarow_i, dtwarow_d."
+				);
+			}
+		}
+
+		return measures;
+	}
+
+	private static boolean isMissingCompatibleDistance(MEASURE measure) {
+
+		return measure == MEASURE.nan_euclidean
+				|| measure == MEASURE.nan_euclidean_i
+				|| measure == MEASURE.dtwarow
+				|| measure == MEASURE.dtwarow_i
+				|| measure == MEASURE.dtwarow_d;
+	}
+
 	public static void main(String[] args) throws IOException {
 		//Runtime.getRuntime().exec(new String[]{"/bin/bash", "-c", "mkdir testdir0"});
 		try {
@@ -102,11 +170,19 @@ public class PFApplication {
 				case "-purity_threshold":
 					AppContext.purity_threshold = Double.parseDouble(options[1]);
 					break;
-				case "-impute_train":
+				case "-impute_train": // should we *return* imputed training set?
 					AppContext.impute_train = Boolean.parseBoolean(options[1]);
 					break;
-				case "-impute_test":
+				case "-impute_test": // should we *return* imputed test set?
 					AppContext.impute_test = Boolean.parseBoolean(options[1]);
+					break;
+				case "-perform_train_imputation": // should we impute train data?
+					AppContext.perform_train_imputation =
+							Boolean.parseBoolean(options[1]);
+					break;
+				case "-perform_test_imputation": // should we impute test data?
+					AppContext.perform_test_imputation =
+							Boolean.parseBoolean(options[1]);
 					break;
 				case "-is2D":
 					AppContext.is2D = Boolean.parseBoolean(options[1]);
@@ -266,6 +342,52 @@ public class PFApplication {
 
 				case "-DTWImpute":
 					AppContext.DTWImpute = Boolean.parseBoolean(options[1]);
+
+					if (AppContext.DTWImpute) {
+						AppContext.gap_update_strategy = "dtw_alignment";
+					} else if (AppContext.gap_update_strategy == null) {
+						AppContext.gap_update_strategy = "standard";
+					}
+
+					break;
+				case "-imputation_initialization":
+					String initStrategy = options[1].trim().toLowerCase();
+
+					if (!initStrategy.equals("impute_first")
+							&& !initStrategy.equals("proximity_first")) {
+						throw new IllegalArgumentException(
+								"Invalid -imputation_initialization value: "
+										+ options[1]
+										+ ". Use impute_first or proximity_first."
+						);
+					}
+
+					AppContext.imputation_initialization_strategy = initStrategy;
+					break;
+
+				case "-gap_update":
+					String gapUpdate = options[1].trim().toLowerCase();
+
+					if (!gapUpdate.equals("standard")
+							&& !gapUpdate.equals("dtw_alignment")) {
+						throw new IllegalArgumentException(
+								"Invalid -gap_update value: "
+										+ options[1]
+										+ ". Use standard or dtw_alignment."
+						);
+					}
+
+					AppContext.gap_update_strategy = gapUpdate;
+
+					/*
+					 * Backward compatibility with older boolean flag.
+					 */
+					AppContext.DTWImpute = gapUpdate.equals("dtw_alignment");
+					break;
+
+				case "-missing_proximity_distances":
+					AppContext.missing_proximity_distances =
+							parseMeasureList(options[1], "missing_proximity_distances");
 					break;
 				case "-MissingStrings":
 					String temp_strings = options[1];
