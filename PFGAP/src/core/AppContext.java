@@ -52,6 +52,14 @@ public class AppContext {
 	public static boolean hasMissingValues = false; //this COULD be figured out... but on the other hand one should probably know their data before ramming it into a classifier.
 	public static Imputer initial_imputer = new MeanImpute();
 	public static int numImputes = 0; //when this is greater than 0, hasMissingValues becomes true.
+
+	// additional imputation variables
+	public static boolean perform_train_imputation = false; // should the model impute (not return) train data?
+	public static boolean perform_test_imputation = false; // should the model impute (not return) test data?
+	public static String imputation_initialization_strategy = "impute_first"; // or "proximity_first"
+	public static String gap_update_strategy = null; //basically vanilla PFImpute or DTWImpute (alternate alignments)
+	public static MEASURE[] missing_proximity_distances = null; //if "proximity_first", which missing-compatible distances to use?
+
 	public static String entry_separator = "\t"; // the default for univariate time series (tsv).
 	public static String array_separator = ":"; // is there a convention for this??
 	// in the matrix case, "rows" are separated by firstSeparator and "columns" by secondSeparator.
