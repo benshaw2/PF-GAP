@@ -4,7 +4,7 @@ import core.AppContext;
 import core.ExperimentRunner;
 import distance.DistanceRegistry;
 import distance.MEASURE;
-import imputation.*;
+import imputation.initial.*;
 import util.GeneralUtilities;
 import util.PrintUtilities;
 

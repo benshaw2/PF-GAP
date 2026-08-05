@@ -1,0 +1,155 @@
+# =========================
+# OS / system files
+# =========================
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.swp
+*.swo
+*~
+
+# =========================
+# IntelliJ / JetBrains IDEs
+# =========================
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# =========================
+# VS Code / editors
+# =========================
+.vscode/
+.history/
+
+# =========================
+# Java compiled output
+# =========================
+*.class
+target/
+build/
+bin/
+classes/
+
+# Do not ignore .jar files for now.
+# Do not ignore .txt files for now.
+
+# =========================
+# Maven / Gradle metadata
+# =========================
+.gradle/
+dependency-reduced-pom.xml
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+pom.xml.bak
+release.properties
+buildNumber.properties
+
+# Keep Maven/Gradle wrappers if you add them later.
+# !.mvn/wrapper/maven-wrapper.jar
+# !gradle/wrapper/gradle-wrapper.jar
+
+# =========================
+# Python caches / bytecode
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# =========================
+# Python environments
+# =========================
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+
+# =========================
+# Jupyter
+# =========================
+*.ipynb
+.ipynb_checkpoints/
+
+# If you later want curated notebooks in the repo, whitelist them, for example:
+# !examples/**/*.ipynb
+
+# =========================
+# Local data and generated outputs
+# =========================
+
+docs/demo/Data/*.txt
+docs/demo/training_output/*.txt
+docs/demo/training_output/Data/*.txt
+
+# Common data files generated during experiments
+*.csv
+*.tsv
+*.npy
+*.npz
+*.parquet
+*.feather
+*.pkl
+*.pickle
+
+# If you want small test fixtures later, whitelist them, for example:
+# !tests/fixtures/**/*.csv
+# !tests/fixtures/**/*.tsv
+
+# =========================
+# PFGAP generated artifacts
+# =========================
+*.ser
+*.model
+*.models
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# Local secrets / configs
+# =========================
+.env
+.env.*
+*.local
+secrets/
+credentials/
+*.key
+*.pem
+
+# =========================
+# Archives / compressed outputs
+# =========================
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# =========================
+# Misc generated files
+# =========================
+*.bak
+*.tmp
+*.cache

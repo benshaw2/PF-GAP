@@ -3,8 +3,8 @@ package imputation;
 import core.AppContext;
 import datasets.ListObjectDataset;
 import distance.MEASURE;
-import proximities.DTWPFImpute;
-import proximities.PFImpute;
+import imputation.update.DTWPFImpute;
+import imputation.update.PFImpute;
 import trees.ProximityForest;
 
 public final class ProximityImputation {

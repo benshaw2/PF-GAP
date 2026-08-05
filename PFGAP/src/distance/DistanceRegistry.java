@@ -1,6 +1,6 @@
 package distance;
 
-import imputation.MaskedDistance;
+import imputation.initial.MaskedDistance;
 
 import java.util.HashMap;
 import java.util.Map;

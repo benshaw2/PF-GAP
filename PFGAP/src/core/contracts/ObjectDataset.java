@@ -4,7 +4,7 @@ import java.util.*;
 
 //This whole thing might need to be redone.
 import datasets.ListObjectDataset;
-import imputation.MissingIndices;
+import imputation.util.MissingIndices;
 
 public interface ObjectDataset {
 
