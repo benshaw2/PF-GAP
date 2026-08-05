@@ -5,9 +5,8 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import core.contracts.ObjectDataset;
-import imputation.MissingIndices;
+import imputation.util.MissingIndices;
 import purity.*;
-import util.ObjectDataUtils; // is this needed here?
 
 public class ListObjectDataset implements ObjectDataset, Serializable {
 

@@ -1,6 +1,7 @@
-package imputation;
+package imputation.initial;
 
 import datasets.ListObjectDataset;
+import imputation.util.MissingIndices;
 
 import java.util.List;
 import java.util.stream.Collectors;

@@ -1,16 +1,13 @@
 package core;
 
-import java.io.Serializable;
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 //import core.contracts.Dataset;
 //import distance.elastic.MEASURE;
 import core.contracts.ObjectDataset;
 import distance.MEASURE;
-import imputation.Imputer;
-import imputation.MeanImpute;
-import imputation.MissingIndices;
+import imputation.initial.Imputer;
+import imputation.initial.MeanImpute;
 
 /**
  * 

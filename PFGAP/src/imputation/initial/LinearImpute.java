@@ -1,18 +1,20 @@
-package imputation;
+package imputation.initial;
 
 import datasets.ListObjectDataset;
+import imputation.util.MissingIndices;
+
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-public class ModeImpute extends Imputer {
+public class LinearImpute extends Imputer {
 
     private static final int CHUNK_SIZE = 1000;
 
 
     public void Impute(ListObjectDataset missingDS) {
         List<Object> rawData = missingDS.getData();
-        var mi = missingDS.getMissingIndices();
+        MissingIndices mi = missingDS.getMissingIndices();
 
         if (mi.is2D()) {
             List<Object> result = new ArrayList<>(rawData.size());
@@ -25,9 +27,9 @@ public class ModeImpute extends Imputer {
                 List<Object> processedChunk = IntStream.range(0, chunk.size())
                         .parallel()
                         .mapToObj(j -> {
-                            Object[][] matrix = (Object[][]) chunk.get(j);
+                            Double[][] matrix = (Double[][]) chunk.get(j);
                             List<List<Integer>> missing = missingChunk.get(j);
-                            Object[][] imputed = convert2D(matrix, missing);
+                            double[][] imputed = convert2DPrimitive(matrix, missing);
                             return (Object) imputed;
                         })
                         .collect(Collectors.toList());
@@ -49,9 +51,9 @@ public class ModeImpute extends Imputer {
                 List<Object> processedChunk = IntStream.range(0, chunk.size())
                         .parallel()
                         .mapToObj(j -> {
-                            Object[] row = (Object[]) chunk.get(j);
+                            Double[] row = (Double[]) chunk.get(j);
                             List<Integer> missing = missingChunk.get(j);
-                            Object[] imputed = convert1D(row, missing);
+                            double[] imputed = convert1DPrimitive(row, missing);
                             return (Object) imputed;
                         })
                         .collect(Collectors.toList());
@@ -65,34 +67,42 @@ public class ModeImpute extends Imputer {
         }
     }
 
-    public static Object[] convert1D(Object[] row, List<Integer> missingIndices) {
-        Object[] result = Arrays.copyOf(row, row.length);
-        Map<Object, Integer> freq = new HashMap<>();
-
-        for (Object val : row) {
-            if (val != null) {
-                freq.put(val, freq.getOrDefault(val, 0) + 1);
-            }
+    public static double[] convert1DPrimitive(Double[] row, List<Integer> missingIndices) {
+        double[] result = new double[row.length];
+        for (int i = 0; i < row.length; i++) {
+            result[i] = row[i] != null ? row[i] : Double.NaN;
         }
 
-        Object mode = freq.entrySet().stream()
-                .max(Map.Entry.comparingByValue())
-                .map(Map.Entry::getKey)
-                .orElse(null);
+        // Linear interpolation
+        for (int i = 0; i < result.length; i++) {
+            if (Double.isNaN(result[i])) {
+                int left = i - 1;
+                while (left >= 0 && Double.isNaN(result[left])) left--;
 
-        for (int i : missingIndices) {
-            result[i] = mode;
+                int right = i + 1;
+                while (right < result.length && Double.isNaN(result[right])) right++;
+
+                if (left >= 0 && right < result.length) {
+                    result[i] = result[left] + (result[right] - result[left]) * (i - left) / (right - left);
+                } else if (left >= 0) {
+                    result[i] = result[left];
+                } else if (right < result.length) {
+                    result[i] = result[right];
+                } else {
+                    result[i] = 0.0;
+                }
+            }
         }
 
         return result;
     }
 
-    public static Object[][] convert2D(Object[][] matrix, List<List<Integer>> missingIndices) {
-        Object[][] result = new Object[matrix.length][];
+    public static double[][] convert2DPrimitive(Double[][] matrix, List<List<Integer>> missingIndices) {
+        double[][] result = new double[matrix.length][];
         for (int i = 0; i < matrix.length; i++) {
-            Object[] row = matrix[i];
+            Double[] row = matrix[i];
             List<Integer> missing = missingIndices.get(i);
-            result[i] = convert1D(row, missing);
+            result[i] = convert1DPrimitive(row, missing);
         }
         return result;
     }

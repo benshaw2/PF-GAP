@@ -1,4 +1,4 @@
-package proximities;
+package outlier;
 
 import java.util.*;
 import java.util.stream.*;

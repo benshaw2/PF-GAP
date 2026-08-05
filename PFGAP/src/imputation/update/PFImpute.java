@@ -1,8 +1,8 @@
-package proximities;
+package imputation.update;
 
 import core.AppContext;
 import datasets.ListObjectDataset;
-import imputation.MissingIndices;
+import imputation.util.MissingIndices;
 
 import java.util.*;
 import java.util.stream.Collectors;

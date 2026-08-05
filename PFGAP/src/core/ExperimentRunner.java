@@ -1,10 +1,10 @@
 package core;
 
 import datasets.ListObjectDataset;
-import imputation.MissingIndicesBuilder;
+import imputation.util.MissingIndicesBuilder;
 import imputation.ProximityImputation;
 import org.apache.commons.lang3.ArrayUtils;
-import proximities.OutlierScorer;
+import outlier.OutlierScorer;
 import trees.ProximityForest;
 import util.GeneralUtilities;
 import util.PrintUtilities;

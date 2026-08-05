@@ -1,4 +1,4 @@
-package proximities;
+package imputation.update;
 
 import core.AppContext;
 import datasets.ListObjectDataset;
@@ -6,7 +6,7 @@ import distance.elastic.DTWWithPath;
 import distance.missing.DTWAROW;
 import distance.missing.DTWAROW_D;
 import distance.multiTS.DTW_D;
-import imputation.MissingIndices;
+import imputation.util.MissingIndices;
 import util.Pair;
 
 import java.util.*;
@@ -14,6 +14,16 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 public class DTWPFImpute {
+
+    /*
+     * DTW-aligned GAP update:
+     *
+     * For a missing value x[n][dim][t], each neighbor k contributes the average
+     * of values x[k][dim][s] over all times s aligned to t by the DTW path
+     * between n and k. The neighbor-level average is then weighted once by
+     * the proximity p(n,k). We renormalize over neighbors that contribute a
+     * computable aligned average.
+     */
 
     private static final double EPSILON = 1e-6;
 
@@ -95,42 +105,23 @@ public class DTWPFImpute {
                             }
 
                             Object neighborSeries = rawData.get(neighborIndex);
+
                             List<Pair<Integer, Integer>> path =
                                     getAlignmentPath(targetIndex, neighborIndex);
 
-                            for (Pair<Integer, Integer> pair : path) {
+                            AlignedAverage alignedAverage =
+                                    alignedAverage1D(
+                                            neighborSeries,
+                                            path,
+                                            targetTime
+                                    );
 
-                                if (pair.getKey() != targetTime) {
-                                    continue;
-                                }
-
-                                int alignedTime = pair.getValue();
-
-                                if (isMissing1D(
-                                        missingIndices1D,
-                                        neighborIndex,
-                                        alignedTime
-                                )) {
-                                    continue;
-                                }
-
-                                if (!hasIndex1D(neighborSeries, alignedTime)) {
-                                    continue;
-                                }
-
-                                double neighborValue =
-                                        getNumericValue1D(
-                                                neighborSeries,
-                                                alignedTime
-                                        );
-
-                                if (Double.isNaN(neighborValue)) {
-                                    continue;
-                                }
-
-                                weightedSum += weight * neighborValue;
-                                totalWeight += weight;
+                            if (!alignedAverage.available) {
+                                continue;
                             }
+
+                            weightedSum += weight * alignedAverage.value;
+                            totalWeight += weight;
                         }
 
                         updatedRow[targetTime] =
@@ -203,48 +194,24 @@ public class DTWPFImpute {
                                 }
 
                                 Object neighborSeries = rawData.get(neighborIndex);
+
                                 List<Pair<Integer, Integer>> path =
                                         getAlignmentPath(targetIndex, neighborIndex);
 
-                                for (Pair<Integer, Integer> pair : path) {
+                                AlignedAverage alignedAverage =
+                                        alignedAverage2D(
+                                                neighborSeries,
+                                                path,
+                                                dim,
+                                                targetTime
+                                        );
 
-                                    if (pair.getKey() != targetTime) {
-                                        continue;
-                                    }
-
-                                    int alignedTime = pair.getValue();
-
-                                    if (isMissing2D(
-                                            missingIndices2D,
-                                            neighborIndex,
-                                            dim,
-                                            alignedTime
-                                    )) {
-                                        continue;
-                                    }
-
-                                    if (!hasIndex2D(
-                                            neighborSeries,
-                                            dim,
-                                            alignedTime
-                                    )) {
-                                        continue;
-                                    }
-
-                                    double neighborValue =
-                                            getNumericValue2D(
-                                                    neighborSeries,
-                                                    dim,
-                                                    alignedTime
-                                            );
-
-                                    if (Double.isNaN(neighborValue)) {
-                                        continue;
-                                    }
-
-                                    weightedSum += weight * neighborValue;
-                                    totalWeight += weight;
+                                if (!alignedAverage.available) {
+                                    continue;
                                 }
+
+                                weightedSum += weight * alignedAverage.value;
+                                totalWeight += weight;
                             }
 
                             updatedMatrix[dim][targetTime] =
@@ -313,42 +280,23 @@ public class DTWPFImpute {
                             }
 
                             Object trainSeries = trainRaw.get(trainIndex);
+
                             List<Pair<Integer, Integer>> path =
                                     getAlignmentPath(testIndex, trainIndex);
 
-                            for (Pair<Integer, Integer> pair : path) {
+                            AlignedAverage alignedAverage =
+                                    alignedAverage1D(
+                                            trainSeries,
+                                            path,
+                                            targetTime
+                                    );
 
-                                if (pair.getKey() != targetTime) {
-                                    continue;
-                                }
-
-                                int alignedTime = pair.getValue();
-
-                                if (isMissing1D(
-                                        trainMissing1D,
-                                        trainIndex,
-                                        alignedTime
-                                )) {
-                                    continue;
-                                }
-
-                                if (!hasIndex1D(trainSeries, alignedTime)) {
-                                    continue;
-                                }
-
-                                double trainValue =
-                                        getNumericValue1D(
-                                                trainSeries,
-                                                alignedTime
-                                        );
-
-                                if (Double.isNaN(trainValue)) {
-                                    continue;
-                                }
-
-                                weightedSum += weight * trainValue;
-                                totalWeight += weight;
+                            if (!alignedAverage.available) {
+                                continue;
                             }
+
+                            weightedSum += weight * alignedAverage.value;
+                            totalWeight += weight;
                         }
 
                         updatedRow[targetTime] =
@@ -423,48 +371,24 @@ public class DTWPFImpute {
                                 }
 
                                 Object trainSeries = trainRaw.get(trainIndex);
+
                                 List<Pair<Integer, Integer>> path =
                                         getAlignmentPath(testIndex, trainIndex);
 
-                                for (Pair<Integer, Integer> pair : path) {
+                                AlignedAverage alignedAverage =
+                                        alignedAverage2D(
+                                                trainSeries,
+                                                path,
+                                                dim,
+                                                targetTime
+                                        );
 
-                                    if (pair.getKey() != targetTime) {
-                                        continue;
-                                    }
-
-                                    int alignedTime = pair.getValue();
-
-                                    if (isMissing2D(
-                                            trainMissing2D,
-                                            trainIndex,
-                                            dim,
-                                            alignedTime
-                                    )) {
-                                        continue;
-                                    }
-
-                                    if (!hasIndex2D(
-                                            trainSeries,
-                                            dim,
-                                            alignedTime
-                                    )) {
-                                        continue;
-                                    }
-
-                                    double trainValue =
-                                            getNumericValue2D(
-                                                    trainSeries,
-                                                    dim,
-                                                    alignedTime
-                                            );
-
-                                    if (Double.isNaN(trainValue)) {
-                                        continue;
-                                    }
-
-                                    weightedSum += weight * trainValue;
-                                    totalWeight += weight;
+                                if (!alignedAverage.available) {
+                                    continue;
                                 }
+
+                                weightedSum += weight * alignedAverage.value;
+                                totalWeight += weight;
                             }
 
                             updatedMatrix[dim][targetTime] =
@@ -1139,5 +1063,106 @@ public class DTWPFImpute {
         }
 
         return map;
+    }
+
+    private static class AlignedAverage {
+
+        final boolean available;
+        final double value;
+
+        AlignedAverage(boolean available, double value) {
+            this.available = available;
+            this.value = value;
+        }
+
+
+    }
+
+    private static AlignedAverage alignedAverage1D(
+            Object neighborSeries,
+            List<Pair<Integer, Integer>> path,
+            int targetTime) {
+
+        double alignedSum = 0.0;
+        int alignedCount = 0;
+
+        for (Pair<Integer, Integer> pair : path) {
+
+            if (pair.getKey() != targetTime) {
+                continue;
+            }
+
+            int alignedTime = pair.getValue();
+
+            if (!hasIndex1D(neighborSeries, alignedTime)) {
+                continue;
+            }
+
+            double value = getNumericValue1D(
+                    neighborSeries,
+                    alignedTime
+            );
+
+            if (Double.isNaN(value)) {
+                continue;
+            }
+
+            alignedSum += value;
+            alignedCount++;
+        }
+
+        if (alignedCount == 0) {
+            return new AlignedAverage(false, Double.NaN);
+        }
+
+        return new AlignedAverage(
+                true,
+                alignedSum / alignedCount
+        );
+    }
+
+    private static AlignedAverage alignedAverage2D(
+            Object neighborSeries,
+            List<Pair<Integer, Integer>> path,
+            int dim,
+            int targetTime) {
+
+        double alignedSum = 0.0;
+        int alignedCount = 0;
+
+        for (Pair<Integer, Integer> pair : path) {
+
+            if (pair.getKey() != targetTime) {
+                continue;
+            }
+
+            int alignedTime = pair.getValue();
+
+            if (!hasIndex2D(neighborSeries, dim, alignedTime)) {
+                continue;
+            }
+
+            double value = getNumericValue2D(
+                    neighborSeries,
+                    dim,
+                    alignedTime
+            );
+
+            if (Double.isNaN(value)) {
+                continue;
+            }
+
+            alignedSum += value;
+            alignedCount++;
+        }
+
+        if (alignedCount == 0) {
+            return new AlignedAverage(false, Double.NaN);
+        }
+
+        return new AlignedAverage(
+                true,
+                alignedSum / alignedCount
+        );
     }
 }

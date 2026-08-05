@@ -1,8 +1,9 @@
-package imputation;
+package imputation.initial;
 
 import datasets.ListObjectDataset;
 import distance.DistanceRegistry;
 import distance.MEASURE;
+import imputation.util.MissingIndices;
 
 import java.util.*;
 import java.util.stream.Collectors;

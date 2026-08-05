@@ -1,18 +1,18 @@
-package imputation;
+package imputation.initial;
 
 import datasets.ListObjectDataset;
-import core.AppContext;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-public class MedianImpute extends Imputer {
+public class ModeImpute extends Imputer {
 
     private static final int CHUNK_SIZE = 1000;
 
+
     public void Impute(ListObjectDataset missingDS) {
         List<Object> rawData = missingDS.getData();
-        MissingIndices mi = missingDS.getMissingIndices();
+        var mi = missingDS.getMissingIndices();
 
         if (mi.is2D()) {
             List<Object> result = new ArrayList<>(rawData.size());
@@ -25,9 +25,9 @@ public class MedianImpute extends Imputer {
                 List<Object> processedChunk = IntStream.range(0, chunk.size())
                         .parallel()
                         .mapToObj(j -> {
-                            Double[][] matrix = (Double[][]) chunk.get(j);
+                            Object[][] matrix = (Object[][]) chunk.get(j);
                             List<List<Integer>> missing = missingChunk.get(j);
-                            double[][] imputed = convert2DPrimitive(matrix, missing);
+                            Object[][] imputed = convert2D(matrix, missing);
                             return (Object) imputed;
                         })
                         .collect(Collectors.toList());
@@ -49,9 +49,9 @@ public class MedianImpute extends Imputer {
                 List<Object> processedChunk = IntStream.range(0, chunk.size())
                         .parallel()
                         .mapToObj(j -> {
-                            Double[] row = (Double[]) chunk.get(j);
+                            Object[] row = (Object[]) chunk.get(j);
                             List<Integer> missing = missingChunk.get(j);
-                            double[] imputed = convert1DPrimitive(row, missing);
+                            Object[] imputed = convert1D(row, missing);
                             return (Object) imputed;
                         })
                         .collect(Collectors.toList());
@@ -65,42 +65,35 @@ public class MedianImpute extends Imputer {
         }
     }
 
-    public static double[] convert1DPrimitive(Double[] row, List<Integer> missingIndices) {
-        double[] result = new double[row.length];
-        List<Double> values = new ArrayList<>();
+    public static Object[] convert1D(Object[] row, List<Integer> missingIndices) {
+        Object[] result = Arrays.copyOf(row, row.length);
+        Map<Object, Integer> freq = new HashMap<>();
 
-        for (int i = 0; i < row.length; i++) {
-            if (row[i] != null) {
-                result[i] = row[i];
-                values.add(row[i]);
+        for (Object val : row) {
+            if (val != null) {
+                freq.put(val, freq.getOrDefault(val, 0) + 1);
             }
         }
 
-        double median = computeMedian(values);
+        Object mode = freq.entrySet().stream()
+                .max(Map.Entry.comparingByValue())
+                .map(Map.Entry::getKey)
+                .orElse(null);
 
         for (int i : missingIndices) {
-            result[i] = median;
+            result[i] = mode;
         }
 
         return result;
     }
 
-    public static double[][] convert2DPrimitive(Double[][] matrix, List<List<Integer>> missingIndices) {
-        double[][] result = new double[matrix.length][];
+    public static Object[][] convert2D(Object[][] matrix, List<List<Integer>> missingIndices) {
+        Object[][] result = new Object[matrix.length][];
         for (int i = 0; i < matrix.length; i++) {
-            Double[] row = matrix[i];
+            Object[] row = matrix[i];
             List<Integer> missing = missingIndices.get(i);
-            result[i] = convert1DPrimitive(row, missing);
+            result[i] = convert1D(row, missing);
         }
         return result;
-    }
-
-    private static double computeMedian(List<Double> values) {
-        if (values.isEmpty()) return 0.0;
-        Collections.sort(values);
-        int n = values.size();
-        return (n % 2 == 1)
-                ? values.get(n / 2)
-                : (values.get(n / 2 - 1) + values.get(n / 2)) / 2.0;
     }
 }
