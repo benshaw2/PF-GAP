@@ -57,7 +57,7 @@ public class DelimitedFileReader {
                             AppContext.length = data[0].length;
                         } else {
                             // numeric, missing values, 1D: Double[]
-                            Double[] data = RowParser.parseBoxedDoubleArray(line, entry_separator);
+                            /*Double[] data = RowParser.parseBoxedDoubleArray(line, entry_separator);
                             //Integer label = labels.get(i);
                             Object label;// = labels.get(i);
                             if (labelFileName!=null) {
@@ -65,6 +65,32 @@ public class DelimitedFileReader {
                             } else {
                                 label = null;
                             }
+                            dataset.add(label, data, i);
+                            AppContext.length = data.length;*/
+                            Object label;
+                            Double[] data;
+
+                            boolean parseEmbeddedLabel =
+                                    labelFileName == null
+                                            && (!isTest || AppContext.exists_testlabels);
+
+                            if (parseEmbeddedLabel) {
+                                String[] lineArray = line.split(entry_separator, -1);
+
+                                ParsedBoxedDoubleRow parsed =
+                                        RowParser.parseBoxedDoubleRow(
+                                                lineArray,
+                                                targetColumnIsFirst,
+                                                isRegression
+                                        );
+
+                                label = parsed.label;
+                                data = parsed.features;
+                            } else {
+                                data = RowParser.parseBoxedDoubleArray(line, entry_separator);
+                                label = labelFileName != null ? labels.get(i) : null;
+                            }
+
                             dataset.add(label, data, i);
                             AppContext.length = data.length;
                         }
@@ -87,7 +113,8 @@ public class DelimitedFileReader {
                             // numeric, no missing values, 1D: double[].
                             if (labelFileName == null && !isTest){
                                 // this is the original case: the labels can't be missing.
-                                String[] lineArray = line.split(entry_separator);
+                                //String[] lineArray = line.split(entry_separator);
+                                String[] lineArray = line.split(entry_separator, -1);
                                 ParsedDoubleRow parsed = RowParser.parseDoubleRow(lineArray, targetColumnIsFirst, isRegression);
                                 dataset.add(parsed.label, parsed.features, i);
                                 //dataset.setLength(parsed.features.length);
@@ -96,7 +123,8 @@ public class DelimitedFileReader {
                                 // we need to know if we're looking for testlabels.
                                 if (AppContext.exists_testlabels) {
                                     // if there are test labels and no test label file was given, they must be in the test file.
-                                    String[] lineArray = line.split(entry_separator);
+                                    //String[] lineArray = line.split(entry_separator);
+                                    String[] lineArray = line.split(entry_separator, -1);
                                     ParsedDoubleRow parsed = RowParser.parseDoubleRow(lineArray, targetColumnIsFirst, isRegression);
                                     dataset.add(parsed.label, parsed.features, i);
                                     //dataset.setLength(parsed.features.length);
@@ -272,6 +300,18 @@ public class DelimitedFileReader {
         }
     }
 
+    public static class ParsedBoxedDoubleRow {
+
+        public final Object label;
+        public final Double[] features;
+
+        public ParsedBoxedDoubleRow(Object label, Double[] features) {
+            this.label = label;
+            this.features = features;
+        }
+    }
+
+
 
     public class RowParser {
 
@@ -330,12 +370,78 @@ public class DelimitedFileReader {
             return new ParsedDoubleRow(label, features);
         }
 
+        public static ParsedBoxedDoubleRow parseBoxedDoubleRow(
+                String[] lineArray,
+                boolean targetColumnIsFirst,
+                boolean isRegression) {
 
-        private static Object tryParseLabel(String token) {
+            int dataLength = lineArray.length - 1;
+            Double[] features = new Double[dataLength];
+            Object label;
+
+            if (targetColumnIsFirst) {
+                label = isRegression
+                        ? Double.parseDouble(lineArray[0].trim())
+                        : tryParseLabel(lineArray[0]);
+
+                for (int j = 1; j <= dataLength; j++) {
+                    features[j - 1] = parseBoxedDoubleToken(lineArray[j]);
+                }
+            } else {
+                label = isRegression
+                        ? Double.parseDouble(lineArray[dataLength].trim())
+                        : tryParseLabel(lineArray[dataLength]);
+
+                for (int j = 0; j < dataLength; j++) {
+                    features[j] = parseBoxedDoubleToken(lineArray[j]);
+                }
+            }
+
+            return new ParsedBoxedDoubleRow(label, features);
+        }
+
+        private static Double parseBoxedDoubleToken(String token) {
+
+            if (token == null) {
+                return null;
+            }
+
+            String trimmed = token.trim();
+
+            if (missingIndicators.contains(trimmed.toUpperCase())) {
+                return null;
+            }
+
+            return Double.valueOf(trimmed);
+        }
+
+
+        /*private static Object tryParseLabel(String token) {
             try {
                 return Integer.parseInt(token.trim());
             } catch (NumberFormatException e) {
                 return token.trim(); // fallback to string
+            }
+        }*/
+
+        private static Object tryParseLabel(String token) {
+
+            String trimmed = token.trim();
+
+            try {
+                return Integer.parseInt(trimmed);
+            } catch (NumberFormatException ignored) {
+                try {
+                    double value = Double.parseDouble(trimmed);
+
+                    if (value == Math.rint(value)) {
+                        return (int) value;
+                    }
+
+                    return value;
+                } catch (NumberFormatException ignoredAgain) {
+                    return trimmed;
+                }
             }
         }
 
