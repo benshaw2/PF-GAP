@@ -282,7 +282,7 @@ public class ExperimentRunner {
 			);
 		}
 
-		if (!AppContext.perform_test_imputation) {
+		if (!AppContext.perform_test_imputation || true) {
 			result.printResults(datasetName, repetition, "");
 		}
 	}
