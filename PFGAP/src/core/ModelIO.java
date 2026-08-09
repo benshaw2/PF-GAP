@@ -82,7 +82,12 @@ public class ModelIO {
         AppContext.config_skip_distance_when_exemplar_matches_query = snapshot.config_skip_distance_when_exemplar_matches_query;
         AppContext.config_use_random_choice_when_min_distance_is_equal = snapshot.config_use_random_choice_when_min_distance_is_equal;
 
-        AppContext.rand_seed = snapshot.rand_seed;
+        //AppContext.rand_seed = snapshot.rand_seed;
+        if (snapshot.rand_seed != null) {
+            AppContext.setRandomSeed(snapshot.rand_seed);
+        } else {
+            AppContext.clearRandomSeed();
+        }
         AppContext.verbosity = snapshot.verbosity;
         AppContext.export_level = snapshot.export_level;
 
@@ -102,7 +107,17 @@ public class ModelIO {
         //AppContext.eval = snapshot.eval;
         //AppContext.length = snapshot.length;
         AppContext.purity_measure = snapshot.purity_measure;
-        AppContext.isRegression = snapshot.isRegression;
+        //AppContext.isRegression = snapshot.isRegression;
+        if (snapshot.forest_mode != null) {
+            AppContext.forest_mode = snapshot.forest_mode;
+
+            AppContext.isRegression = "regression".equalsIgnoreCase(snapshot.forest_mode);
+        } else {
+            // Backward compatibility for older saved models.
+            AppContext.forest_mode = AppContext.isRegression
+                    ? "regression"
+                    : "classification";
+        }
         AppContext.voting = snapshot.voting;
         AppContext.purity_threshold = snapshot.purity_threshold;
 

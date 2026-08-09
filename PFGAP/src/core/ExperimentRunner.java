@@ -4,6 +4,7 @@ import datasets.ListObjectDataset;
 import imputation.util.MissingIndicesBuilder;
 import imputation.ProximityImputation;
 import org.apache.commons.lang3.ArrayUtils;
+import outlier.IsolationDepthScorer;
 import outlier.OutlierScorer;
 import trees.ProximityForest;
 import util.GeneralUtilities;
@@ -160,11 +161,16 @@ public class ExperimentRunner {
 				writeTestingData();
 			}
 
+			if (AppContext.isIsolationMode()) {
+				handleIsolationScores(forest, test_data, trainData.size(), "IsolationScores_saved.txt");
+				continue;
+			}
+
 			if (AppContext.getprox) {
 				computeAndWriteTestTrainProximities(forest, trainData);
 			}
 
-			if (AppContext.get_predictions) {
+			if (AppContext.get_predictions && !AppContext.isIsolationMode()) {
 				writePredictions(
 						result,
 						test_data,
@@ -191,7 +197,7 @@ public class ExperimentRunner {
 				AppContext.hasMissingValues,
 				AppContext.target_column_is_first,
 				false,
-				AppContext.isRegression
+				AppContext.isRegressionMode()
 		);
 	}
 
@@ -208,7 +214,7 @@ public class ExperimentRunner {
 				AppContext.hasMissingValues,
 				AppContext.target_column_is_first,
 				true,
-				AppContext.isRegression
+				AppContext.isRegressionMode()
 		);
 	}
 
@@ -217,7 +223,7 @@ public class ExperimentRunner {
 
 		ListObjectDataset prepared;
 
-		if (!AppContext.isRegression) {
+		if (AppContext.isClassificationMode()) {
 			prepared = original.reorder_class_labels(null);
 		} else {
 			prepared = original;
@@ -238,7 +244,7 @@ public class ExperimentRunner {
 
 		ListObjectDataset prepared;
 
-		if (!AppContext.isRegression) {
+		if (AppContext.isClassificationMode()) {
 			prepared = original.reorder_class_labels(labelMap);
 		} else {
 			prepared = original;
@@ -268,13 +274,18 @@ public class ExperimentRunner {
 			);
 		}
 
+		if (AppContext.isIsolationMode()) {
+			handleIsolationScores(forest, test_data, train_data.size(), "IsolationScores.txt");
+			return;
+		}
+
 		if (AppContext.impute_test) {
 			writeTestingData();
 		}
 
 		ProximityForestResult result = forest.test(test_data);
 
-		if (AppContext.get_predictions) {
+		if (AppContext.get_predictions && !AppContext.isIsolationMode()) {
 			writePredictions(
 					result,
 					test_data,
@@ -282,9 +293,7 @@ public class ExperimentRunner {
 			);
 		}
 
-		if (!AppContext.perform_test_imputation || true) {
-			result.printResults(datasetName, repetition, "");
-		}
+		result.printResults(datasetName, repetition, "");
 	}
 
 	private void saveModel(ProximityForest forest) {
@@ -293,7 +302,7 @@ public class ExperimentRunner {
 			AppContextSnapshot snapshot = AppContextUtils.captureSnapshot();
 
 			ModelIO.saveModel(
-					AppContext.output_dir + AppContext.modelname + ".ser",
+					AppContext.output_dir + "/" + AppContext.modelname + ".ser",
 					forest,
 					train_data,
 					snapshot
@@ -328,12 +337,16 @@ public class ExperimentRunner {
 			ListObjectDataset data,
 			String fileName) throws IOException {
 
+		if (AppContext.isIsolationMode()) {
+			return;
+		}
+
 		PrintWriter writer = new PrintWriter(
 				AppContext.output_dir + fileName,
 				StandardCharsets.UTF_8
 		);
 
-		if (!AppContext.isRegression) {
+		if (!AppContext.isRegressionMode()) {
 			List<Object> predictedLabels = result.Predictions;
 			Map<Integer, Object> newToOriginal =
 					data.invertLabelMap(data._get_initial_class_labels());
@@ -351,9 +364,23 @@ public class ExperimentRunner {
 	}
 
 	private void handleTrainingOutlierScores(
-			ProximityForest forest) throws IOException, ExecutionException, InterruptedException {
+			ProximityForest forest) throws Exception {
 
-		if (!AppContext.get_training_outlier_scores || AppContext.isRegression) {
+		if (!AppContext.get_training_outlier_scores) {
+			return;
+		}
+
+		if (AppContext.isIsolationMode()) {
+			handleIsolationScores(
+					forest,
+					train_data,
+					train_data.size(),
+					"outlier_scores.txt"
+			);
+			return;
+		}
+
+		if (AppContext.isRegressionMode()) {
 			return;
 		}
 
@@ -428,6 +455,28 @@ public class ExperimentRunner {
 					train_data
 			);
 		}
+	}
+
+	private void handleIsolationScores(
+			ProximityForest forest,
+			ListObjectDataset data,
+			int normalizationSampleSize,
+			String fileName
+	) throws Exception {
+
+		double[] scores = IsolationDepthScorer.score(
+				forest,
+				data,
+				normalizationSampleSize
+		);
+
+		PrintWriter writer = new PrintWriter(
+				AppContext.output_dir + fileName,
+				StandardCharsets.UTF_8
+		);
+
+		writer.print(ArrayUtils.toString(scores));
+		writer.close();
 	}
 
 	private void computeAndWriteTestTrainProximities(

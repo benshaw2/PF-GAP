@@ -34,8 +34,8 @@ public class AppContext {
 	//********************************************************************
 	
 	//DEFAULT SETTINGS, these are overridden by command line arguments
-	public static long rand_seed;	//TODO set seed to reproduce results
-	public static Random rand;
+	//public static long rand_seed;	//TODO set seed to reproduce results
+	//public static Random rand;
 	
 	public static int verbosity = 0; //0, 1, 2 
 	public static int export_level = 1; //0, 1, 2 
@@ -49,6 +49,7 @@ public class AppContext {
 	public static boolean hasMissingValues = false; //this COULD be figured out... but on the other hand one should probably know their data before ramming it into a classifier.
 	public static Imputer initial_imputer = new MeanImpute();
 	public static int numImputes = 0; //when this is greater than 0, hasMissingValues becomes true.
+	public static boolean bootstrap_trees = true;
 
 	// additional imputation variables
 	public static boolean perform_train_imputation = false; // should the model impute (not return) train data?
@@ -71,6 +72,11 @@ public class AppContext {
 	public static String voting = "mean";
 	public static double purity_threshold = 1e-6;
 
+	// variables for isolation forest
+	public static String forest_mode = "classification"; // or "isolation" or "regression"
+	public static int isolation_num_branches = 2;
+	public static int regression_num_branches = 2; // I suppose we can change this as well...
+	public static int isolation_min_leaf_size = 1;
 
 	public static int num_repeats = 1;
 	public static int num_trees = 11;
@@ -136,13 +142,27 @@ public class AppContext {
 	public static Map<Integer, Map<Integer, Double>> training_proximities_sparse;
 	public static Map<Integer, Map<Integer, Double>> testing_training_proximities_sparse;
 
-	static {
-		rand = new Random();
+	//static {
+	//	rand = new Random();
+	//}
+
+	public static Long rand_seed = null;
+	private static Random rand = new Random();
+
+	public static void setRandomSeed(long seed) {
+		rand_seed = seed;
+		rand = new Random(seed);
 	}
 
 	public static Random getRand() {
 		return rand;
 	}
+
+	public static void clearRandomSeed() {
+		rand_seed = null;
+		rand = new Random();
+	}
+
 
 	//public static Dataset getTraining_data() {
 	public static ObjectDataset getTraining_data() {
@@ -170,5 +190,25 @@ public class AppContext {
 
 	public static void setDatasetName(String datasetName) {
 		AppContext.datasetName = datasetName;
+	}
+
+	public static boolean isIsolationMode() {
+		return forest_mode != null
+				&& forest_mode.trim().equalsIgnoreCase("isolation");
+	}
+
+	public static boolean isRegressionMode() {
+		return isRegression
+				|| (forest_mode != null
+				&& forest_mode.trim().equalsIgnoreCase("regression"));
+	}
+
+	public static boolean isClassificationMode() {
+		return forest_mode == null
+				|| forest_mode.trim().equalsIgnoreCase("classification");
+	}
+
+	public static boolean useBootstrapTrees() {
+		return bootstrap_trees;
 	}
 }

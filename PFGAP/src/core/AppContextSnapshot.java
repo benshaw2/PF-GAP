@@ -12,7 +12,7 @@ public class AppContextSnapshot implements Serializable {
     public boolean config_skip_distance_when_exemplar_matches_query;
     public boolean config_use_random_choice_when_min_distance_is_equal;
 
-    public long rand_seed;
+    public Long rand_seed;
     public int verbosity;
     public int export_level;
 
@@ -35,6 +35,7 @@ public class AppContextSnapshot implements Serializable {
     public boolean isRegression;
     public String voting;
     public double purity_threshold;
+    public String forest_mode;
 
     //public int num_repeats;
     public int num_trees;

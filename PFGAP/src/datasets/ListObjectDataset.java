@@ -6,7 +6,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import core.contracts.ObjectDataset;
 import imputation.util.MissingIndices;
-import purity.*;
+import purity.classification.Entropy;
+import purity.classification.Gini;
+import purity.regression.MAD;
+import purity.regression.Variance;
 
 public class ListObjectDataset implements ObjectDataset, Serializable {
 
