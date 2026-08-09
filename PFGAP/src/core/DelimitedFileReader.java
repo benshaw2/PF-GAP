@@ -24,30 +24,30 @@ public class DelimitedFileReader {
             boolean isRegression
     ) {
         ListObjectDataset dataset = new ListObjectDataset();
-        File f = new File(dataFileName);
+        //File f = new File(dataFileName);
         int i = 0;
         long start = System.nanoTime();
 
         try {
             //List<Integer> labels = readLabels(labelFileName, hasHeader);
             List<Object> labels = new ArrayList<>();
-            if (labelFileName!=null) {
+            if (labelFileName != null) {
                 labels = readGenericLabels(labelFileName, hasHeader, isRegression);
             }
-            BufferedReader br = new BufferedReader(new FileReader(dataFileName));
+            try (BufferedReader br = new BufferedReader(new FileReader(dataFileName))) {;
             if (hasHeader) br.readLine(); // skip header
 
             String line = "";
             while ((line = br.readLine()) != null) {
 
-                if (isNumeric){ //either double or Double
-                    if (hasMissingValues){ //must be Double since there's missing data
-                        if (is2D){
+                if (isNumeric) { //either double or Double
+                    if (hasMissingValues) { //must be Double since there's missing data
+                        if (is2D) {
                             // numeric, has missing values, 2D: Double[][]
                             Double[][] data = RowParser.parseBoxedDoubleMatrix(line, array_separator, entry_separator);
                             //Integer label = labels.get(i);
                             Object label;// = labels.get(i);
-                            if (labelFileName!=null) {
+                            if (labelFileName != null) {
                                 label = labels.get(i);
                             } else {
                                 label = null;
@@ -72,6 +72,7 @@ public class DelimitedFileReader {
 
                             boolean parseEmbeddedLabel =
                                     labelFileName == null
+                                            && !AppContext.isIsolationMode()
                                             && (!isTest || AppContext.exists_testlabels);
 
                             if (parseEmbeddedLabel) {
@@ -96,12 +97,12 @@ public class DelimitedFileReader {
                         }
                     } else {
                         // Should be double since there's no missing data.
-                        if (is2D){
+                        if (is2D) {
                             // numeric, no missing values, 2D: double[][]
                             double[][] data = RowParser.parseDoubleMatrix(line, array_separator, entry_separator);
                             //Integer label = labels.get(i);
                             Object label;// = labels.get(i);
-                            if (labelFileName!=null) {
+                            if (labelFileName != null) {
                                 label = labels.get(i);
                             } else {
                                 label = null;
@@ -111,7 +112,7 @@ public class DelimitedFileReader {
                             AppContext.length = data[0].length;
                         } else {
                             // numeric, no missing values, 1D: double[].
-                            if (labelFileName == null && !isTest){
+                            if (labelFileName == null && !isTest && !AppContext.isIsolationMode()) {
                                 // this is the original case: the labels can't be missing.
                                 //String[] lineArray = line.split(entry_separator);
                                 String[] lineArray = line.split(entry_separator, -1);
@@ -119,6 +120,11 @@ public class DelimitedFileReader {
                                 dataset.add(parsed.label, parsed.features, i);
                                 //dataset.setLength(parsed.features.length);
                                 AppContext.length = parsed.features.length;
+                            } else if (labelFileName == null && AppContext.isIsolationMode()) {
+                                // this is the isolation mode branch. no labels, and whole row is assumed to be data.
+                                double[] data = RowParser.parseDoubleArray(line, entry_separator);
+                                dataset.add(null, data, i);
+                                AppContext.length = data.length;
                             } else if (labelFileName == null && isTest) {
                                 // we need to know if we're looking for testlabels.
                                 if (AppContext.exists_testlabels) {
@@ -150,13 +156,13 @@ public class DelimitedFileReader {
 
                         }
                     }
-                } else{
+                } else {
                     // it is either Object[] or Object[][] since it's not all numeric.
                     if (is2D) {
                         Object[][] data = RowParser.parse2DRow(line, array_separator, entry_separator);
                         //Integer label = labels.get(i);
                         Object label;// = labels.get(i);
-                        if (labelFileName!=null) {
+                        if (labelFileName != null) {
                             label = labels.get(i);
                         } else {
                             label = null;
@@ -168,7 +174,7 @@ public class DelimitedFileReader {
                         Object[] data = RowParser.parse1DRow(line, entry_separator);
                         //Integer label = labels.get(i);
                         Object label;// = labels.get(i);
-                        if (labelFileName!=null) {
+                        if (labelFileName != null) {
                             label = labels.get(i);
                         } else {
                             label = null;
@@ -182,6 +188,7 @@ public class DelimitedFileReader {
                 ProgressLogger.logProgress(i);
                 i++;
             }
+        }
 
             long end = System.nanoTime();
             ProgressLogger.logDuration(start, end);
@@ -447,10 +454,10 @@ public class DelimitedFileReader {
 
 
         public static double[] parseDoubleArray(String row, String separator) { // for no labels
-            String[] tokens = row.split(separator);
+            String[] tokens = row.split(separator, -1);
             double[] parsed = new double[tokens.length];
             for (int i = 0; i < tokens.length; i++) {
-                parsed[i] = Double.parseDouble(tokens[i]);
+                parsed[i] = Double.parseDouble(tokens[i].trim());
             }
             return parsed;
         }

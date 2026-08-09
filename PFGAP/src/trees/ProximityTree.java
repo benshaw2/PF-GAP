@@ -1,7 +1,7 @@
 package trees;
 
 import java.io.Serializable;
-import java.lang.reflect.Array;
+//import java.lang.reflect.Array;
 import java.util.*;
 
 import core.AppContext;
@@ -14,8 +14,8 @@ import distance.DistanceMeasure;
 import distance.MEASURE;
 import org.apache.commons.lang3.ArrayUtils;
 
-import java.util.Random;
-import java.util.stream.IntStream;
+//import java.util.Random;
+//import java.util.stream.IntStream;
 
 /**
  * 
@@ -105,9 +105,18 @@ public class ProximityTree implements Serializable {
 		ObjectDataset inbagData = new ListObjectDataset(); //ListDataset();
 		ObjectDataset oobData = new ListObjectDataset(); //ListDataset();
 
+		if (data == null || data.size() == 0) {
+			throw new IllegalArgumentException("Cannot train ProximityTree on empty data.");
+		}
+
 		//First we get the in-bag indices.
 		int dummySize = data.size();
-		int[]  randomIntsArray = IntStream.generate(() -> new Random().nextInt(dummySize)).limit(data.size()).toArray();
+		//int[]  randomIntsArray = IntStream.generate(() -> new Random().nextInt(dummySize)).limit(data.size()).toArray();
+		//int[] randomIntsArray = IntStream
+		//		.generate(() -> AppContext.getRand().nextInt(dummySize))
+		//		.limit(data.size())
+		//		.toArray();
+		int[] randomIntsArray = sampleTrainingIndices(dummySize);
 		//InBagIndices = new ArrayList<Integer>();
 		for(int i=0; i<randomIntsArray.length; i++){
 			this.getRootNode().InBagIndices.add(randomIntsArray[i]);
@@ -275,6 +284,27 @@ public class ProximityTree implements Serializable {
 		
 		return max_depth+1;
 	}
+
+	private int[] sampleTrainingIndices(int n) {
+
+		if (n <= 0) {
+			return new int[]{};
+		}
+
+		int[] indices = new int[n];
+
+		if (AppContext.bootstrap_trees) {
+			for (int i = 0; i < n; i++) {
+				indices[i] = AppContext.getRand().nextInt(n);
+			}
+		} else {
+			for (int i = 0; i < n; i++) {
+				indices[i] = i;
+			}
+		}
+
+		return indices;
+	}
 	
 	public int get_min_depth(Node n) {
 		int max_depth = 0;
@@ -396,9 +426,12 @@ public class ProximityTree implements Serializable {
 
 
 		public static Object computeLeafLabel(List<Object> labels) {
+			if (AppContext.isIsolationMode()) {
+				return null;
+			}
 			if (labels == null || labels.isEmpty()) return null;
 
-			if (AppContext.isRegression) {
+			if (AppContext.isRegressionMode()) {
 				// Collect numeric values
 				List<Double> numericLabels = new ArrayList<>();
 				for (Object label : labels) {
@@ -457,7 +490,16 @@ public class ProximityTree implements Serializable {
 //				return;
 			}
 
-			if (!AppContext.isRegression && data.purity(AppContext.purity_measure) <= AppContext.purity_threshold) {
+			if (AppContext.isIsolationMode()) {
+				if (data.size() <= AppContext.isolation_min_leaf_size) {
+					this.label = null;
+					this.is_leaf = true;
+					this.tree.leaves.add(this);
+					return;
+				}
+			}
+
+			/*if (!AppContext.isRegression && data.purity(AppContext.purity_measure) <= AppContext.purity_threshold) {
 				this.label = computeLeafLabel(data._internal_class_list());
 				this.is_leaf = true;
 				this.tree.leaves.add(this);
@@ -465,6 +507,14 @@ public class ProximityTree implements Serializable {
 			}
 
 			if (AppContext.isRegression && data.purity(AppContext.purity_measure) <= AppContext.purity_threshold) {
+				this.label = computeLeafLabel(data._internal_class_list());
+				this.is_leaf = true;
+				this.tree.leaves.add(this);
+				return;
+			}*/
+
+			if (!AppContext.isIsolationMode()
+					&& data.purity(AppContext.purity_measure) <= AppContext.purity_threshold) {
 				this.label = computeLeafLabel(data._internal_class_list());
 				this.is_leaf = true;
 				this.tree.leaves.add(this);
@@ -499,9 +549,14 @@ public class ProximityTree implements Serializable {
 				return;
 			}*/
 
-			if (AppContext.max_depth != 0 && this.tree.get_height() >= AppContext.max_depth) {
+			//if (AppContext.max_depth != 0 && this.tree.get_height() >= AppContext.max_depth) {
 
-				this.label = computeLeafLabel(data._internal_class_list());
+			//	this.label = computeLeafLabel(data._internal_class_list());
+			if (AppContext.max_depth != 0 && this.node_depth >= AppContext.max_depth) {
+
+				this.label = AppContext.isIsolationMode()
+						? null
+						: computeLeafLabel(data._internal_class_list());
 
 				this.is_leaf = true;
 				this.tree.leaves.add(this);
@@ -517,8 +572,12 @@ public class ProximityTree implements Serializable {
 			// check to see if any would-be child nodes are empty. We don't want that.
 			if (best_splits == null || Arrays.stream(best_splits).anyMatch(split -> split.size() == 0)) {
 				this.is_leaf = true;
-				this.label = computeLeafLabel(data._internal_class_list());
+				//this.label = computeLeafLabel(data._internal_class_list());
+				this.label = AppContext.isIsolationMode()
+						? null
+						: computeLeafLabel(data._internal_class_list());
 				this.tree.leaves.add(this);
+				return;
 			} else {
 
 				//Dataset[] oob_splits = new Dataset[best_splits.length];

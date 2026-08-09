@@ -55,6 +55,12 @@ def train(
     repeats=1,
     num_trees=11,
     r=5,
+    forest_mode=None, # defaults to being a classifier
+    isolation_num_branches=2,
+    isolation_min_leaf_size=1,
+    regression_num_branches=2,
+    bootstrap_trees=True,
+    seed=None,
     on_tree=True,
     max_depth=0,
     shuffle=False,
@@ -100,6 +106,26 @@ def train(
         raise ValueError("Keyword argument 'data_dimension' must be 1 or 2.")
 
     is2D = data_dimension == 2
+    
+    if forest_mode is None:
+        forest_mode = "regression" if regressor else "classification"
+        
+    forest_model = forest_mode.lower()
+    
+    if forest_mode not in {"classification", "regression", "isolation"}:
+        raise ValueError("forest_mode must be one of: 'classification', 'regression', or 'isolation'.")
+        
+    if forest_mode == "regression":
+        regressor = True
+    elif forest_mode in {"classification", "isolation"}:
+        regressor = False
+        
+    # a user should select a compatible purity, if they forgot.
+    if forest_mode == "isolation" and purity == "gini":
+        purity = "isolation_path_length"
+        
+    if forest_mode == "regression" and purity == "gini":
+        purity = "variance"
 
     if has_missing_values is None:
         has_missing_values = (
@@ -121,8 +147,10 @@ def train(
 
     if return_imputed_testing and not impute_testing_data:
         impute_testing_data = True
+        
+    model_name = os.path.basename(os.path.normpath(str(model_name)))
 
-    msgList = ["java", "-jar", "-Xmx" + memory, "PFGAP.jar", "-eval=false"]
+    msgList = ["java", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=false"]
 
     msgList.extend([
         "-train=" + str(train_file),
@@ -169,6 +197,12 @@ def train(
         "-purity_measure=" + purity,
         "-purity_threshold=" + str(purity_threshold),
         "-voting=" + regressor_aggregation,
+        
+        "-forest_mode=" + forest_mode,
+        "-isolation_num_branches=" + str(isolation_num_branches),
+        "-isolation_min_leaf_size=" + str(isolation_min_leaf_size),
+        "-regression_num_branches=" + str(regression_num_branches),
+        "-bootstrap_trees=" + _bool(bootstrap_trees),
 
         "-DTWImpute=" + _bool(DTWImpute),
         "-imputation_initialization=" + imputation_initialization,
@@ -185,6 +219,9 @@ def train(
 
     if knn_distances is not None:
         _append_common_distance_arg(msgList, "knn_distances", knn_distances)
+        
+    if seed is not None:
+        msgList.append("-seed=" + str(seed))
 
     return subprocess.call(msgList)
 
@@ -201,6 +238,7 @@ def predict(
     export=1,
     verbosity=1,
     file_has_header=False,
+    forest_mode=None,
     target_column="first",
     parallel_trees=False,
     parallel_prox=False,
@@ -240,6 +278,10 @@ def predict(
             or imputation_initialization == "proximity_first"
             or missing_proximity_distances is not None
         )
+        
+    # you must impute the data if you want imputed data returned.
+    if return_imputed_testing and not impute_testing_data:
+        impute_testing_data = True
 
     if gap_update is None:
         gap_update = "dtw_alignment" if DTWImpute else "standard"
@@ -248,7 +290,7 @@ def predict(
     array_separator = _separator_arg(array_separator)
     output_directory = _ensure_output_directory(output_directory)
 
-    msgList = ["java", "-jar", "-Xmx" + memory, "PFGAP.jar", "-eval=true"]
+    msgList = ["java", "-Xmx" + memory, "-jar", "PFGAP.jar", "-eval=true"]
 
     msgList.extend([
         "-train=" + str(testfile),

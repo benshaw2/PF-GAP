@@ -38,6 +38,7 @@ public class AppContextUtils {
         snapshot.isRegression = AppContext.isRegression;
         snapshot.voting = AppContext.voting;
         snapshot.purity_threshold = AppContext.purity_threshold;
+        snapshot.forest_mode = AppContext.forest_mode;
 
         //snapshot.num_repeats = AppContext.num_repeats;
         snapshot.num_trees = AppContext.num_trees;

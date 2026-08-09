@@ -123,6 +123,12 @@ public class PFApplication {
 				String[] options = args[i].trim().split("=");
 				
 				switch(options[0]) {
+				case "-seed":
+					AppContext.setRandomSeed(Long.parseLong(options[1]));
+					break;
+				case "-bootstrap_trees":
+					AppContext.bootstrap_trees = Boolean.parseBoolean(options[1]);
+					break;
 				case "-eval":
 					AppContext.eval = Boolean.parseBoolean(options[1]);
 					break;
@@ -160,6 +166,32 @@ public class PFApplication {
 					}
 				case "-isRegression":
 					AppContext.isRegression = Boolean.parseBoolean(options[1]);
+					break;
+				case "-forest_mode":
+					AppContext.forest_mode = options[1].trim().toLowerCase();
+
+					if (AppContext.forest_mode.equals("regression")) {
+						AppContext.isRegression = true;
+					} else if (AppContext.forest_mode.equals("classification")
+							|| AppContext.forest_mode.equals("isolation")) {
+						AppContext.isRegression = false;
+					} else {
+						throw new IllegalArgumentException(
+								"Invalid forest_mode: " + options[1]
+						);
+					}
+
+					break;
+				case "-isolation_num_branches":
+					AppContext.isolation_num_branches = Integer.parseInt(options[1]);
+					break;
+
+				case "-regression_num_branches":
+					AppContext.regression_num_branches = Integer.parseInt(options[1]);
+					break;
+
+				case "-isolation_min_leaf_size":
+					AppContext.isolation_min_leaf_size = Integer.parseInt(options[1]);
 					break;
 				case "-purity_measure":
 					AppContext.purity_measure = options[1];
@@ -503,33 +535,35 @@ public class PFApplication {
 				}
 			}
 
-			switch (imputerType) {
-				case "knn":
-					if (AppContext.KNNdistances == null || AppContext.KNNdistances.length == 0)
-						throw new IllegalArgumentException("Missing -knn_distances for KNN imputer.");
-					AppContext.initial_imputer = new KNNImputer(AppContext.KNNdistances, 5);
-					break;
-				case "mean":
-					AppContext.initial_imputer = new MeanImpute();
-					break;
-				case "global_mean":
-					AppContext.initial_imputer = new GlobalMeanImpute();
-					break;
-				case "linear":
-					AppContext.initial_imputer = new LinearImpute();
-					break;
-				case "median":
-					AppContext.initial_imputer = new MedianImpute();
-					break;
-				case "global_median":
-					AppContext.initial_imputer = new GlobalMedianImpute();
-					break;
-				case "mode":
-					AppContext.initial_imputer = new ModeImpute();
-					break;
-				case "global_mode":
-					AppContext.initial_imputer = new GlobalModeImpute();
-					break;
+			if (imputerType !=null) {
+				switch (imputerType) {
+					case "knn":
+						if (AppContext.KNNdistances == null || AppContext.KNNdistances.length == 0)
+							throw new IllegalArgumentException("Missing -knn_distances for KNN imputer.");
+						AppContext.initial_imputer = new KNNImputer(AppContext.KNNdistances, 5);
+						break;
+					case "mean":
+						AppContext.initial_imputer = new MeanImpute();
+						break;
+					case "global_mean":
+						AppContext.initial_imputer = new GlobalMeanImpute();
+						break;
+					case "linear":
+						AppContext.initial_imputer = new LinearImpute();
+						break;
+					case "median":
+						AppContext.initial_imputer = new MedianImpute();
+						break;
+					case "global_median":
+						AppContext.initial_imputer = new GlobalMedianImpute();
+						break;
+					case "mode":
+						AppContext.initial_imputer = new ModeImpute();
+						break;
+					case "global_mode":
+						AppContext.initial_imputer = new GlobalModeImpute();
+						break;
+				}
 			}
 
 			if (AppContext.warmup_java) {
