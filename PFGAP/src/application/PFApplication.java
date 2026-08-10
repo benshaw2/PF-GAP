@@ -5,6 +5,7 @@ import core.ExperimentRunner;
 import distance.DistanceRegistry;
 import distance.MEASURE;
 import imputation.initial.*;
+import proximities.ProximityType;
 import util.GeneralUtilities;
 import util.PrintUtilities;
 
@@ -396,7 +397,21 @@ public class PFApplication {
 
 					AppContext.imputation_initialization_strategy = initStrategy;
 					break;
-
+				case "-proximity_type":
+					try {
+						AppContext.proximityType =
+								ProximityType.valueOf(
+										options[1].trim().toUpperCase(Locale.ROOT)
+								);
+					} catch (IllegalArgumentException e) {
+						throw new Exception(
+								"Invalid proximity_type: "
+										+ options[1]
+										+ ". Valid options are: "
+										+ Arrays.toString(ProximityType.values())
+						);
+					}
+					break;
 				case "-gap_update":
 					String gapUpdate = options[1].trim().toLowerCase();
 
