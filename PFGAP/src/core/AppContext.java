@@ -8,6 +8,7 @@ import core.contracts.ObjectDataset;
 import distance.MEASURE;
 import imputation.initial.Imputer;
 import imputation.initial.MeanImpute;
+import proximities.ProximityType;
 
 /**
  * 
@@ -77,6 +78,9 @@ public class AppContext {
 	public static int isolation_num_branches = 2;
 	public static int regression_num_branches = 2; // I suppose we can change this as well...
 	public static int isolation_min_leaf_size = 1;
+
+	// proximities
+	public static ProximityType proximityType = ProximityType.PFGAP;
 
 	public static int num_repeats = 1;
 	public static int num_trees = 11;

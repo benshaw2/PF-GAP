@@ -40,6 +40,23 @@ def _append_if_not_none(msg_list, arg_name, value):
     if value is not None:
         msg_list.append(f"-{arg_name}={value}")
         
+def _proximity_type_arg(value):
+    if value is None:
+        return "PFGAP"
+
+    value = str(value).strip().upper()
+
+    valid = {
+        "PFGAP",
+        "BREIMAN",
+        "DEPTH_WEIGHTED",
+    }
+
+    if value not in valid:
+        raise ValueError(
+            "proximity_type must be one of: "
+            + ", ".join(sorted(valid)
+        
 
 def train(
     train_file,
@@ -49,6 +66,7 @@ def train(
     exists_testlabels=False,
     return_predictions=False,
     return_proximities=False,
+    proximity_type="PFGAP",
     save_model=True,
     model_name="PF",
     output_directory="",
@@ -172,6 +190,7 @@ def train(
         "-target_column=" + target_column,
 
         "-getprox=" + _bool(return_proximities),
+        "-proximity_type=" + _proximity_type_arg(proximity_type),
         "-get_predictions=" + _bool(return_predictions),
         "-savemodel=" + _bool(save_model),
         "-modelname=" + model_name,
@@ -233,6 +252,7 @@ def predict(
     exists_testlabels=False,
     return_predictions=False,
     return_proximities=False,
+    proximity_type="PFGAP",
     output_directory="",
     shuffle=False,
     export=1,
@@ -305,6 +325,7 @@ def predict(
         "-target_column=" + target_column,
 
         "-getprox=" + _bool(return_proximities),
+        "-proximity_type=" + _proximity_type_arg(proximity_type),
         "-get_predictions=" + _bool(return_predictions),
         "-modelname=" + model_name,
 
