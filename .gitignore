@@ -98,6 +98,7 @@ venv.bak/
 docs/demo/Data/*.txt
 docs/demo/training_output/*.txt
 docs/demo/training_output/Data/*.txt
+tests/tests_tmp
 
 # Common data files generated during experiments
 *.csv
