@@ -12,6 +12,10 @@ import org.apache.parquet.hadoop.ParquetReader;
 //import org.apache.parquet.hadoop.util.HadoopInputFile;
 import org.apache.parquet.io.LocalInputFile;
 import java.nio.file.Paths;
+// ignore hadoop errors
+//import org.apache.log4j.BasicConfigurator;
+//import org.apache.log4j.Level;
+//import org.apache.log4j.Logger;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -69,6 +73,13 @@ import java.util.stream.Collectors;
  */
 public class LongFormatParquetReader implements DatasetReader {
 
+    /*static {
+        if (!Logger.getRootLogger().getAllAppenders().hasMoreElements()) {
+            BasicConfigurator.configure();
+            Logger.getRootLogger().setLevel(Level.ERROR);
+        }
+    }*/
+
     private final String dataFileName;
     private final boolean isNumeric;
     private final boolean hasMissingValues;
@@ -121,8 +132,18 @@ public class LongFormatParquetReader implements DatasetReader {
 
     @Override
     public ListObjectDataset read() throws IOException {
-
         validateOptions();
+
+        if (idColumn == null || idColumn.trim().isEmpty()) {
+            return readRowWiseDataset();
+        }
+
+        return readGroupedLongFormatDataset();
+    }
+
+    public ListObjectDataset readGroupedLongFormatDataset() throws IOException {
+
+        //validateOptions();
 
         long start = System.nanoTime();
 
@@ -196,6 +217,49 @@ public class LongFormatParquetReader implements DatasetReader {
         return dataset;
     }
 
+    private ListObjectDataset readRowWiseDataset() throws IOException {
+
+        long start = System.nanoTime();
+
+        ListObjectDataset dataset = new ListObjectDataset();
+
+        try (ParquetReader<GenericRecord> reader =
+                     AvroParquetReader.<GenericRecord>builder(
+                             new LocalInputFile(Paths.get(dataFileName))
+                     ).build()) {
+
+            GenericRecord record;
+            int rowIndex = 0;
+
+            while ((record = reader.read()) != null) {
+
+                Object[] featureValues = new Object[featureColumns.size()];
+
+                for (int j = 0; j < featureColumns.size(); j++) {
+                    String featureColumn = featureColumns.get(j);
+                    Object rawValue = normalizeParquetValue(record.get(featureColumn));
+                    featureValues[j] = parseFeatureValue(rawValue, featureColumn);
+                }
+
+                Object label = parseLabelValues(record);
+
+                Object data = buildRowWiseData(featureValues);
+
+                dataset.add(label, data, rowIndex);
+
+                updateGlobalLength(data);
+
+                ProgressLogger.logProgress(rowIndex);
+                rowIndex++;
+            }
+        }
+
+        long end = System.nanoTime();
+        ProgressLogger.logDuration(start, end);
+
+        return dataset;
+    }
+
     private ListObjectDataset buildDataset(
             Map<Object, List<LongParquetRow>> groupedRows
     ) {
@@ -222,6 +286,38 @@ public class LongFormatParquetReader implements DatasetReader {
         }
 
         return dataset;
+    }
+
+    private Object buildRowWiseData(Object[] featureValues) {
+
+        int length = featureValues.length;
+
+        if (isNumeric) {
+
+            if (hasMissingValues) {
+                Double[] data = new Double[length];
+
+                for (int i = 0; i < length; i++) {
+                    data[i] = toBoxedDouble(featureValues[i]);
+                }
+
+                return data;
+            }
+
+            double[] data = new double[length];
+
+            for (int i = 0; i < length; i++) {
+                data[i] = toPrimitiveDouble(featureValues[i]);
+            }
+
+            return data;
+        }
+
+        Object[] data = new Object[length];
+
+        System.arraycopy(featureValues, 0, data, 0, length);
+
+        return data;
     }
 
     private void sortRows(List<LongParquetRow> rows) {
@@ -622,12 +718,6 @@ public class LongFormatParquetReader implements DatasetReader {
         if (dataFileName == null || dataFileName.trim().isEmpty()) {
             throw new IllegalArgumentException(
                     "LongFormatParquetReader requires dataFileName."
-            );
-        }
-
-        if (idColumn == null || idColumn.trim().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "LongFormatParquetReader requires idColumn."
             );
         }
 

@@ -53,9 +53,7 @@ public final class DatasetReaderFactory {
                 );
 
             case HDF5:
-                throw new UnsupportedOperationException(
-                        "HDF5 reader has not been implemented yet."
-                );
+                return createHDF5Reader(options);
 
             case NESTED_PARQUET:
                 throw new UnsupportedOperationException(
@@ -126,11 +124,6 @@ public final class DatasetReaderFactory {
                 "Long-format delimited reader requires entrySeparator."
         );
 
-        requireNonNullOrEmpty(
-                options.getIdColumn(),
-                "Long-format delimited reader requires idColumn."
-        );
-
         if (options.getFeatureColumns().isEmpty()) {
             throw new IllegalArgumentException(
                     "Long-format delimited reader requires at least one feature column."
@@ -144,14 +137,11 @@ public final class DatasetReaderFactory {
             ReaderOptions options
     ) {
 
+        // if no idColumn is supplied, we assume that each row is an independent data instance
+
         requireNonNullOrEmpty(
                 options.getDataPath(),
                 "Long-format Parquet reader requires dataPath."
-        );
-
-        requireNonNullOrEmpty(
-                options.getIdColumn(),
-                "Long-format Parquet reader requires idColumn."
         );
 
         if (options.getFeatureColumns().isEmpty()) {
@@ -161,6 +151,23 @@ public final class DatasetReaderFactory {
         }
 
         return new LongFormatParquetReader(options);
+    }
+
+    private static DatasetReader createHDF5Reader(
+            ReaderOptions options
+    ) {
+
+        requireNonNullOrEmpty(
+                options.getDataPath(),
+                "HDF5 reader requires dataPath."
+        );
+
+        requireNonNullOrEmpty(
+                options.getHdf5DatasetPath(),
+                "HDF5 reader requires hdf5DatasetPath."
+        );
+
+        return new HDF5Reader(options);
     }
 
     private static void requireNonNullOrEmpty(

@@ -52,6 +52,9 @@ public class AppContext {
 	public static String time_column = null;
 	public static List<String> feature_columns = new ArrayList<>();
 	public static List<String> label_columns = new ArrayList<>();
+	// HDF5
+	public static String hdf5_dataset_path = "/X";
+	public static String hdf5_label_dataset_path = "/y";
 
 	public static boolean is2D = false; // this becomes true for multiTS and (probably) graph data.
 	public static boolean isNumeric = true; // TODO: write distances for string, boolean, date types.

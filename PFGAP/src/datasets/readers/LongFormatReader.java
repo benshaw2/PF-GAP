@@ -122,6 +122,18 @@ public class LongFormatReader implements DatasetReader {
 
         validateOptions();
 
+        if (idColumn == null || idColumn.trim().isEmpty()) {
+            return readRowWiseDataset();
+        }
+
+        return readGroupedLongFormatDataset();
+
+    }
+
+    public ListObjectDataset readGroupedLongFormatDataset() throws IOException {
+
+        //validateOptions();
+
         long start = System.nanoTime();
 
         Map<Object, List<LongRow>> groupedRows = new LinkedHashMap<>();
@@ -216,6 +228,84 @@ public class LongFormatReader implements DatasetReader {
         }
 
         ListObjectDataset dataset = buildDataset(groupedRows);
+
+        long end = System.nanoTime();
+        ProgressLogger.logDuration(start, end);
+
+        return dataset;
+    }
+
+    private ListObjectDataset readRowWiseDataset() throws IOException {
+
+        long start = System.nanoTime();
+
+        ListObjectDataset dataset = new ListObjectDataset();
+
+        try (BufferedReader br = new BufferedReader(new FileReader(dataFileName))) {
+
+            String headerLine = br.readLine();
+
+            if (headerLine == null) {
+                throw new IOException("Long-format file is empty: " + dataFileName);
+            }
+
+            if (!hasHeader) {
+                throw new IOException(
+                        "LongFormatReader row-wise mode currently requires a header "
+                                + "because featureColumns and labelColumns are specified "
+                                + "by column name."
+                );
+            }
+
+            String[] header = splitLine(headerLine);
+            Map<String, Integer> columnIndex = buildColumnIndex(header);
+
+            List<Integer> featureIndices = new ArrayList<>();
+
+            for (String featureColumn : featureColumns) {
+                featureIndices.add(
+                        requireColumn(columnIndex, featureColumn, "featureColumns")
+                );
+            }
+
+            List<Integer> labelIndices = new ArrayList<>();
+
+            for (String labelColumn : labelColumns) {
+                labelIndices.add(
+                        requireColumn(columnIndex, labelColumn, "labelColumns")
+                );
+            }
+
+            String line;
+            int rowIndex = 0;
+
+            while ((line = br.readLine()) != null) {
+
+                if (line.trim().isEmpty()) {
+                    continue;
+                }
+
+                String[] tokens = splitLine(line);
+
+                Object[] featureValues = new Object[featureIndices.size()];
+
+                for (int j = 0; j < featureIndices.size(); j++) {
+                    featureValues[j] =
+                            parseFeatureValue(getToken(tokens, featureIndices.get(j)));
+                }
+
+                Object label = parseLabelValues(tokens, labelIndices);
+
+                Object data = buildRowWiseData(featureValues);
+
+                dataset.add(label, data, rowIndex);
+
+                updateGlobalLength(data);
+
+                ProgressLogger.logProgress(rowIndex);
+                rowIndex++;
+            }
+        }
 
         long end = System.nanoTime();
         ProgressLogger.logDuration(start, end);
@@ -414,6 +504,38 @@ public class LongFormatReader implements DatasetReader {
                 data[d][t] = row.featureValues[d];
             }
         }
+
+        return data;
+    }
+
+    private Object buildRowWiseData(Object[] featureValues) {
+
+        int length = featureValues.length;
+
+        if (isNumeric) {
+
+            if (hasMissingValues) {
+                Double[] data = new Double[length];
+
+                for (int i = 0; i < length; i++) {
+                    data[i] = toBoxedDouble(featureValues[i]);
+                }
+
+                return data;
+            }
+
+            double[] data = new double[length];
+
+            for (int i = 0; i < length; i++) {
+                data[i] = toPrimitiveDouble(featureValues[i]);
+            }
+
+            return data;
+        }
+
+        Object[] data = new Object[length];
+
+        System.arraycopy(featureValues, 0, data, 0, length);
 
         return data;
     }
@@ -617,12 +739,6 @@ public class LongFormatReader implements DatasetReader {
     }
 
     private void validateOptions() {
-
-        if (dataFileName == null || dataFileName.trim().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "LongFormatReader requires dataFileName."
-            );
-        }
 
         if (entrySeparator == null || entrySeparator.isEmpty()) {
             throw new IllegalArgumentException(
