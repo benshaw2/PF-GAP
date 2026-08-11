@@ -200,7 +200,9 @@ public class ExperimentRunner {
 				.setIdColumn(AppContext.id_column)
 				.setTimeColumn(AppContext.time_column)
 				.setFeatureColumns(AppContext.feature_columns)
-				.setLabelColumns(AppContext.label_columns);
+				.setLabelColumns(AppContext.label_columns)
+				.setHdf5DatasetPath(AppContext.hdf5_dataset_path)
+				.setHdf5LabelDatasetPath(AppContext.hdf5_label_dataset_path);
 	}
 
 	private ReaderType resolveReaderType(String path) {

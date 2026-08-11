@@ -201,7 +201,16 @@ public class PFApplication {
 			//override the default settings using the provided command line arguments
 			String imputerType = null;
 			for (int i = 0; i < args.length; i++) {
-				String[] options = args[i].trim().split("=");
+				//String[] options = args[i].trim().split("=");
+				String[] options = args[i].trim().split("=", 2);
+
+				if (options.length != 2) {
+					throw new IllegalArgumentException(
+							"Invalid command-line argument: "
+									+ args[i]
+									+ ". Expected -name=value."
+					);
+				}
 				
 				switch(options[0]) {
 				case "-seed":
@@ -263,6 +272,12 @@ public class PFApplication {
 
 				case "-label_columns":
 					AppContext.label_columns = parseStringList(options[1]);
+					break;
+				case "-hdf5_dataset_path":
+					AppContext.hdf5_dataset_path = parseNullableString(options[1]);
+					break;
+				case "-hdf5_label_dataset_path":
+					AppContext.hdf5_label_dataset_path = parseNullableString(options[1]);
 					break;
 				case "-isRegression":
 					AppContext.isRegression = Boolean.parseBoolean(options[1]);

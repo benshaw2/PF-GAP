@@ -120,6 +120,8 @@ def train(
     time_column=None,
     feature_columns=None,
     label_columns=None,
+    hdf5_dataset_path="/X",
+    hdf5_label_dataset_path="/y",
 
     # Other outputs/model controls
     return_training_outlier_scores=False,
@@ -253,6 +255,9 @@ def train(
 
     if label_columns is not None:
         msgList.append(f"-label_columns={_list_arg(label_columns)}")
+        
+    _append_if_not_none(msgList, "hdf5_dataset_path", hdf5_dataset_path)
+    _append_if_not_none(msgList, "hdf5_label_dataset_path", hdf5_label_dataset_path)
 
     if knn_distances is not None:
         _append_common_distance_arg(msgList, "knn_distances", knn_distances)
@@ -293,6 +298,8 @@ def predict(
     time_column=None,
     feature_columns=None,
     label_columns=None,
+    hdf5_dataset_path="/X",
+    hdf5_label_dataset_path="/y",
 
     # Missing/imputation controls
     has_missing_values=None,
@@ -387,6 +394,9 @@ def predict(
 
     if label_columns is not None:
         msgList.append(f"-label_columns={_list_arg(label_columns)}")
+        
+    _append_if_not_none(msgList, "hdf5_dataset_path", hdf5_dataset_path)
+    _append_if_not_none(msgList, "hdf5_label_dataset_path", hdf5_label_dataset_path)
 
     if knn_distances is not None:
         _append_common_distance_arg(msgList, "knn_distances", knn_distances)
