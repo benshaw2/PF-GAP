@@ -1,0 +1,175 @@
+package datasets.readers;
+
+import java.util.Objects;
+
+/**
+ * Factory for constructing DatasetReader implementations from ReaderOptions.
+ *
+ * ExperimentRunner and other high-level execution code should use this
+ * factory instead of directly instantiating concrete reader classes.
+ *
+ * This keeps reader-selection logic centralized and makes it easier to add
+ * new readers without modifying downstream experiment code.
+ */
+public final class DatasetReaderFactory {
+
+    private DatasetReaderFactory() {
+        // Utility class.
+    }
+
+    /**
+     * Creates a DatasetReader based on the supplied ReaderOptions.
+     *
+     * @param options reader configuration
+     * @return concrete DatasetReader implementation
+     */
+    public static DatasetReader create(ReaderOptions options) {
+
+        Objects.requireNonNull(options, "ReaderOptions cannot be null.");
+
+        ReaderType readerType = options.getReaderType();
+
+        if (readerType == null) {
+            throw new IllegalArgumentException("ReaderType cannot be null.");
+        }
+
+        switch (readerType) {
+
+            case DELIMITED:
+                return createDelimitedReader(options);
+
+            case TS:
+                return createTSReader(options);
+
+            case LONG_FORMAT_DELIMITED:
+                return createLongFormatDelimitedReader(options);
+
+            case LONG_FORMAT_PARQUET:
+                return createLongFormatParquetReader(options);
+
+            case DIRECTORY:
+                throw new UnsupportedOperationException(
+                        "DIRECTORY reader has not been implemented yet."
+                );
+
+            case HDF5:
+                throw new UnsupportedOperationException(
+                        "HDF5 reader has not been implemented yet."
+                );
+
+            case NESTED_PARQUET:
+                throw new UnsupportedOperationException(
+                        "NESTED_PARQUET reader has not been implemented yet."
+                );
+
+            default:
+                throw new IllegalArgumentException(
+                        "Unsupported reader type: " + readerType
+                );
+        }
+    }
+
+    private static DatasetReader createDelimitedReader(ReaderOptions options) {
+
+        requireNonNullOrEmpty(
+                options.getDataPath(),
+                "Delimited reader requires dataPath."
+        );
+
+        requireNonNullOrEmpty(
+                options.getEntrySeparator(),
+                "Delimited reader requires entrySeparator."
+        );
+
+        return new DelimitedFileReader(
+                options.getDataPath(),
+                options.getLabelPath(),
+                options.getEntrySeparator(),
+                options.getArraySeparator(),
+                options.hasHeader(),
+                options.is2D(),
+                options.isNumeric(),
+                options.hasMissingValues(),
+                options.targetColumnIsFirst(),
+                options.isTest(),
+                options.isRegression()
+        );
+    }
+
+    private static DatasetReader createTSReader(ReaderOptions options) {
+
+        requireNonNullOrEmpty(
+                options.getDataPath(),
+                "TS reader requires dataPath."
+        );
+
+        return new TSFileReader(
+                options.getDataPath(),
+                options.getLabelPath(),
+                options.isNumeric(),
+                options.hasMissingValues(),
+                options.isRegression()
+        );
+    }
+
+    private static DatasetReader createLongFormatDelimitedReader(
+            ReaderOptions options
+    ) {
+
+        requireNonNullOrEmpty(
+                options.getDataPath(),
+                "Long-format delimited reader requires dataPath."
+        );
+
+        requireNonNullOrEmpty(
+                options.getEntrySeparator(),
+                "Long-format delimited reader requires entrySeparator."
+        );
+
+        requireNonNullOrEmpty(
+                options.getIdColumn(),
+                "Long-format delimited reader requires idColumn."
+        );
+
+        if (options.getFeatureColumns().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Long-format delimited reader requires at least one feature column."
+            );
+        }
+
+        return new LongFormatReader(options);
+    }
+
+    private static DatasetReader createLongFormatParquetReader(
+            ReaderOptions options
+    ) {
+
+        requireNonNullOrEmpty(
+                options.getDataPath(),
+                "Long-format Parquet reader requires dataPath."
+        );
+
+        requireNonNullOrEmpty(
+                options.getIdColumn(),
+                "Long-format Parquet reader requires idColumn."
+        );
+
+        if (options.getFeatureColumns().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Long-format Parquet reader requires at least one feature column."
+            );
+        }
+
+        return new LongFormatParquetReader(options);
+    }
+
+    private static void requireNonNullOrEmpty(
+            String value,
+            String message
+    ) {
+
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException(message);
+        }
+    }
+}

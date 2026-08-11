@@ -5,6 +5,7 @@ import java.util.*;
 //import core.contracts.Dataset;
 //import distance.elastic.MEASURE;
 import core.contracts.ObjectDataset;
+import datasets.readers.ReaderType;
 import distance.MEASURE;
 import imputation.initial.Imputer;
 import imputation.initial.MeanImpute;
@@ -45,9 +46,17 @@ public class AppContext {
 	public static String testing_file = System.getProperty("user.dir") + "/Data/" + "GunPoint" + "_TEST.tsv"; //"E:/data/ucr/cleaned/ItalyPowerDemand/ItalyPowerDemand_TEST.csv";
 	public static String training_labels = null; // sometimes this is inferred from training_file.
 	public static String testing_labels = null; // sometimes this is inferred from testing_file.
+
+	public static ReaderType readerType = null;
+	public static String id_column = null;
+	public static String time_column = null;
+	public static List<String> feature_columns = new ArrayList<>();
+	public static List<String> label_columns = new ArrayList<>();
+
 	public static boolean is2D = false; // this becomes true for multiTS and (probably) graph data.
 	public static boolean isNumeric = true; // TODO: write distances for string, boolean, date types.
 	public static boolean hasMissingValues = false; //this COULD be figured out... but on the other hand one should probably know their data before ramming it into a classifier.
+
 	public static Imputer initial_imputer = new MeanImpute();
 	public static int numImputes = 0; //when this is greater than 0, hasMissingValues becomes true.
 	public static boolean bootstrap_trees = true;

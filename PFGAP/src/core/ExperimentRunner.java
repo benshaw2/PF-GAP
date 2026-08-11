@@ -1,6 +1,7 @@
 package core;
 
 import datasets.ListObjectDataset;
+import datasets.readers.*;
 import imputation.util.MissingIndicesBuilder;
 import imputation.ProximityImputation;
 import org.apache.commons.lang3.ArrayUtils;
@@ -184,38 +185,103 @@ public class ExperimentRunner {
 		}
 	}
 
-	private ListObjectDataset readTrainingData() {
+	private ReaderOptions buildBaseReaderOptions(String dataPath) {
 
-		return DelimitedFileReader.readToListObjectDataset(
-				AppContext.training_file,
-				AppContext.training_labels,
-				AppContext.entry_separator,
-				AppContext.array_separator,
-				AppContext.csv_has_header,
-				AppContext.is2D,
-				AppContext.isNumeric,
-				AppContext.hasMissingValues,
-				AppContext.target_column_is_first,
-				false,
-				AppContext.isRegressionMode()
-		);
+		return new ReaderOptions()
+				.setReaderType(resolveReaderType(dataPath))
+				.setEntrySeparator(AppContext.entry_separator)
+				.setArraySeparator(AppContext.array_separator)
+				.setHasHeader(AppContext.csv_has_header)
+				.set2D(AppContext.is2D)
+				.setNumeric(AppContext.isNumeric)
+				.setHasMissingValues(AppContext.hasMissingValues)
+				.setTargetColumnIsFirst(AppContext.target_column_is_first)
+				.setRegression(AppContext.isRegressionMode())
+				.setIdColumn(AppContext.id_column)
+				.setTimeColumn(AppContext.time_column)
+				.setFeatureColumns(AppContext.feature_columns)
+				.setLabelColumns(AppContext.label_columns);
 	}
 
-	private ListObjectDataset readTestData() {
+	private ReaderType resolveReaderType(String path) {
 
-		return DelimitedFileReader.readToListObjectDataset(
-				AppContext.testing_file,
-				AppContext.testing_labels,
-				AppContext.entry_separator,
-				AppContext.array_separator,
-				AppContext.csv_has_header,
-				AppContext.is2D,
-				AppContext.isNumeric,
-				AppContext.hasMissingValues,
-				AppContext.target_column_is_first,
-				true,
-				AppContext.isRegressionMode()
-		);
+		if (AppContext.readerType != null) {
+			return AppContext.readerType;
+		}
+
+		if (path == null) {
+			return ReaderType.DELIMITED;
+		}
+
+		String lower = path.toLowerCase();
+
+		if (lower.endsWith(".ts")) {
+			return ReaderType.TS;
+		}
+
+		/*
+		 * Important:
+		 *
+		 * We do not infer LONG_FORMAT_DELIMITED from .csv/.tsv/.txt,
+		 * because those extensions are ambiguous.
+		 *
+		 * A .csv file may be ordinary row-wise data or long-format time-series data.
+		 * Users should specify:
+		 *
+		 *      -reader_type=LONG_FORMAT_DELIMITED
+		 *
+		 * when they want long-format parsing.
+		 */
+		if (lower.endsWith(".csv")
+				|| lower.endsWith(".tsv")
+				|| lower.endsWith(".txt")) {
+			return ReaderType.DELIMITED;
+		}
+
+		/*
+		 * Parquet is less ambiguous for now because the only Parquet reader
+		 * currently implemented is long-format Parquet.
+		 *
+		 * Later, if NESTED_PARQUET is implemented, explicit reader_type should
+		 * be preferred for all Parquet files too.
+		 */
+		if (lower.endsWith(".parquet")) {
+			return ReaderType.LONG_FORMAT_PARQUET;
+		}
+
+		if (lower.endsWith(".h5") || lower.endsWith(".hdf5")) {
+			return ReaderType.HDF5;
+		}
+
+		return ReaderType.DELIMITED;
+	}
+
+	private ListObjectDataset readTrainingData() throws IOException {
+
+		ReaderOptions trainOptions =
+				buildBaseReaderOptions(AppContext.training_file)
+						.setDataPath(AppContext.training_file)
+						.setLabelPath(AppContext.training_labels)
+						.setTest(false);
+
+		DatasetReader trainReader =
+				DatasetReaderFactory.create(trainOptions);
+
+		return trainReader.read();
+	}
+
+	private ListObjectDataset readTestData() throws IOException {
+
+		ReaderOptions testOptions =
+				buildBaseReaderOptions(AppContext.testing_file)
+						.setDataPath(AppContext.testing_file)
+						.setLabelPath(AppContext.testing_labels)
+						.setTest(true);
+
+		DatasetReader testReader =
+				DatasetReaderFactory.create(testOptions);
+
+		return testReader.read();
 	}
 
 	private ListObjectDataset prepareTrainingData(

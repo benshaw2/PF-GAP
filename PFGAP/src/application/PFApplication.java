@@ -2,6 +2,7 @@ package application;
 
 import core.AppContext;
 import core.ExperimentRunner;
+import datasets.readers.ReaderType;
 import distance.DistanceRegistry;
 import distance.MEASURE;
 import imputation.initial.*;
@@ -111,6 +112,85 @@ public class PFApplication {
 				|| measure == MEASURE.dtwarow_d;
 	}
 
+	private static ReaderType parseReaderType(String raw) {
+
+		if (raw == null || raw.trim().isEmpty()) {
+			return null;
+		}
+
+		try {
+			return ReaderType.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException(
+					"Invalid reader_type: "
+							+ raw
+							+ ". Valid options are: "
+							+ Arrays.toString(ReaderType.values())
+			);
+		}
+	}
+
+	private static List<String> parseStringList(String raw) {
+
+		List<String> values = new ArrayList<>();
+
+		if (raw == null) {
+			return values;
+		}
+
+		String trimmed = raw.trim();
+
+		if (trimmed.isEmpty()
+				|| trimmed.equalsIgnoreCase("None")
+				|| trimmed.equals("[]")) {
+			return values;
+		}
+
+		/*
+		 * Accept both:
+		 *
+		 *    temp,pressure,humidity
+		 *
+		 * and:
+		 *
+		 *    [temp,pressure,humidity]
+		 */
+		if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+			trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+		}
+
+		if (trimmed.isEmpty()) {
+			return values;
+		}
+
+		String[] parts = trimmed.split(",");
+
+		for (String part : parts) {
+			String value = part.trim();
+
+			if (!value.isEmpty()) {
+				values.add(value);
+			}
+		}
+
+		return values;
+	}
+
+	private static String parseNullableString(String raw) {
+
+		if (raw == null) {
+			return null;
+		}
+
+		String trimmed = raw.trim();
+
+		if (trimmed.isEmpty() || trimmed.equalsIgnoreCase("None")) {
+			return null;
+		}
+
+		return trimmed;
+	}
+
 	public static void main(String[] args) throws IOException {
 		//Runtime.getRuntime().exec(new String[]{"/bin/bash", "-c", "mkdir testdir0"});
 		try {
@@ -165,6 +245,25 @@ public class PFApplication {
 						AppContext.exists_testlabels = Boolean.parseBoolean(options[1]);
 						break;
 					}
+				case "-reader_type":
+					AppContext.readerType = parseReaderType(options[1]);
+					break;
+
+				case "-id_column":
+					AppContext.id_column = parseNullableString(options[1]);
+					break;
+
+				case "-time_column":
+					AppContext.time_column = parseNullableString(options[1]);
+					break;
+
+				case "-feature_columns":
+					AppContext.feature_columns = parseStringList(options[1]);
+					break;
+
+				case "-label_columns":
+					AppContext.label_columns = parseStringList(options[1]);
+					break;
 				case "-isRegression":
 					AppContext.isRegression = Boolean.parseBoolean(options[1]);
 					break;
