@@ -55,7 +55,10 @@ def _proximity_type_arg(value):
     if value not in valid:
         raise ValueError(
             "proximity_type must be one of: "
-            + ", ".join(sorted(valid)
+            + ", ".join(sorted(valid))
+            )
+            
+    return value
         
 
 def train(
@@ -112,6 +115,11 @@ def train(
     numeric_data=True,
     entry_separator=",",
     array_separator=":",
+    reader_type=None,
+    id_column=None,
+    time_column=None,
+    feature_columns=None,
+    label_columns=None,
 
     # Other outputs/model controls
     return_training_outlier_scores=False,
@@ -235,6 +243,16 @@ def train(
 
     _append_common_distance_arg(msgList, "distances", distances)
     _append_common_distance_arg(msgList, "missing_proximity_distances", missing_proximity_distances)
+    
+    _append_if_not_none(msgList, "reader_type", reader_type)
+    _append_if_not_none(msgList, "id_column", id_column)
+    _append_if_not_none(msgList, "time_column", time_column)
+
+    if feature_columns is not None:
+        msgList.append(f"-feature_columns={_list_arg(feature_columns)}")
+
+    if label_columns is not None:
+        msgList.append(f"-label_columns={_list_arg(label_columns)}")
 
     if knn_distances is not None:
         _append_common_distance_arg(msgList, "knn_distances", knn_distances)
@@ -270,6 +288,11 @@ def predict(
     numeric_data=True,
     entry_separator=",",
     array_separator=":",
+    reader_type=None,
+    id_column=None,
+    time_column=None,
+    feature_columns=None,
+    label_columns=None,
 
     # Missing/imputation controls
     has_missing_values=None,
@@ -354,6 +377,16 @@ def predict(
 
     _append_common_distance_arg(msgList, "distances", distances)
     _append_common_distance_arg(msgList, "missing_proximity_distances", missing_proximity_distances)
+    
+    _append_if_not_none(msgList, "reader_type", reader_type)
+    _append_if_not_none(msgList, "id_column", id_column)
+    _append_if_not_none(msgList, "time_column", time_column)
+
+    if feature_columns is not None:
+        msgList.append(f"-feature_columns={_list_arg(feature_columns)}")
+
+    if label_columns is not None:
+        msgList.append(f"-label_columns={_list_arg(label_columns)}")
 
     if knn_distances is not None:
         _append_common_distance_arg(msgList, "knn_distances", knn_distances)
