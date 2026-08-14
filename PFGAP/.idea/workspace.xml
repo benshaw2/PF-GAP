@@ -6,7 +6,147 @@
     </artifacts-to-build>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="" />
+    <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/../Application/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PFGAP.jar" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/artifacts/PFGAP_jar.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/artifacts/PFGAP_jar.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/PFGAP.iml" beforeDir="false" afterPath="$PROJECT_DIR$/PFGAP.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/deps/parquet-deps-pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/deps/parquet-deps-pom.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/aircompressor-0.27.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/animal-sniffer-annotations-1.17.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/aopalliance-1.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/audience-annotations-0.5.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/avro-1.11.4.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/checker-qual-2.5.2.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-beanutils-1.9.4.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-cli-1.2.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-codec-1.15.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-collections-3.2.2.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-compress-1.21.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-configuration2-2.8.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-io-2.8.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-lang3-3.12.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-logging-1.1.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-math3-3.1.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-net-3.9.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-pool-1.6.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/commons-text-1.10.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/curator-client-5.2.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/curator-framework-5.2.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/curator-recipes-5.2.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/dnsjava-2.1.7.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/failureaccess-1.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/gson-2.9.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/guava-27.0-jre.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/guice-4.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/guice-servlet-4.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/hadoop-annotations-3.3.6.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/hadoop-auth-3.3.6.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/hadoop-common-3.3.6.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/hadoop-hdfs-client-3.3.6.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/hadoop-mapreduce-client-core-3.3.6.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/hadoop-shaded-guava-1.1.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/hadoop-shaded-protobuf_3_7-1.1.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/hadoop-yarn-api-3.3.6.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/hadoop-yarn-client-3.3.6.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/hadoop-yarn-common-3.3.6.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/httpclient-4.5.13.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/httpcore-4.4.13.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/j2objc-annotations-1.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jackson-annotations-2.12.7.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jackson-core-2.14.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jackson-databind-2.12.7.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jackson-datatype-jdk8-2.17.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jackson-jaxrs-base-2.12.7.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jackson-jaxrs-json-provider-2.12.7.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jackson-module-jaxb-annotations-2.12.7.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jakarta.activation-api-1.2.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jakarta.xml.bind-api-2.3.2.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/javax.annotation-api-1.3.2.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/javax.inject-1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/javax.servlet-api-3.1.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jaxb-api-2.2.11.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jaxb-impl-2.2.3-1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jcip-annotations-1.0-1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jersey-client-1.19.4.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jersey-core-1.19.4.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jersey-guice-1.19.4.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jersey-json-1.20.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jersey-server-1.19.4.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jersey-servlet-1.19.4.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jettison-1.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jetty-client-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jetty-http-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jetty-io-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jetty-security-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jetty-server-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jetty-servlet-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jetty-util-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jetty-util-ajax-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jetty-webapp-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jetty-xml-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jline-3.9.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jsch-0.1.55.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jsp-api-2.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jsr305-3.0.2.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/jsr311-api-1.1.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerb-admin-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerb-client-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerb-common-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerb-core-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerb-crypto-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerb-identity-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerb-server-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerb-simplekdc-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerb-util-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerby-asn1-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerby-config-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerby-pkix-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerby-util-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kerby-xdr-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kotlin-stdlib-1.4.10.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/kotlin-stdlib-common-1.4.10.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/log4j-1.2.17.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/metrics-core-3.2.4.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/netty-3.10.6.Final.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/netty-buffer-4.1.63.Final.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/netty-codec-4.1.63.Final.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/netty-common-4.1.63.Final.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/netty-handler-4.1.63.Final.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/netty-resolver-4.1.63.Final.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/netty-transport-4.1.63.Final.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/netty-transport-native-epoll-4.1.63.Final.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/netty-transport-native-unix-common-4.1.63.Final.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/nimbus-jose-jwt-9.8.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/okhttp-4.9.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/okio-2.8.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/parquet-avro-1.14.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/parquet-column-1.14.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/parquet-common-1.14.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/parquet-encoding-1.14.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/parquet-format-structures-1.14.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/parquet-hadoop-1.14.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/parquet-jackson-1.14.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/protobuf-java-2.5.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/re2j-1.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/reload4j-1.2.22.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/slf4j-api-1.7.33.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/slf4j-log4j12-1.7.25.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/slf4j-reload4j-1.7.36.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/snappy-java-1.1.8.2.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/stax2-api-4.2.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/token-provider-1.0.1.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/websocket-api-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/websocket-client-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/websocket-common-9.4.51.v20230217.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/woodstox-core-5.4.0.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/zookeeper-3.6.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/zookeeper-jute-3.6.3.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/parquet/zstd-jni-1.5.6-2.jar" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/LongFormatParquetReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/LongFormatParquetReader.java" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -15,6 +155,7 @@
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
+        <option value="Enum" />
         <option value="Interface" />
         <option value="Class" />
       </list>
@@ -22,6 +163,16 @@
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/.." />
+  </component>
+  <component name="MavenImportPreferences">
+    <option name="importingSettings">
+      <MavenImportingSettings>
+        <option name="jdkForImporter" value="#USE_PROJECT_JDK" />
+      </MavenImportingSettings>
+    </option>
+  </component>
+  <component name="ProblemsViewState">
+    <option name="selectedIndex" value="1" />
   </component>
   <component name="ProjectId" id="31L0Ijm2ycnp9KUaa2AZuKTNuQW" />
   <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
@@ -33,15 +184,16 @@
     <property name="RunOnceActivity.OpenProjectViewOnStart" value="true" />
     <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
     <property name="SHARE_PROJECT_CONFIGURATION_FILES" value="true" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/../../java-os/java-ui" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/lib/parquet/snappy-java-1.1.10.8.jar" />
     <property name="project.structure.last.edited" value="Artifacts" />
-    <property name="project.structure.proportion" value="0.28698552" />
-    <property name="project.structure.side.proportion" value="0.26373625" />
-    <property name="settings.editor.selected.configurable" value="project.propVCSSupport.Mappings" />
+    <property name="project.structure.proportion" value="0.20536344" />
+    <property name="project.structure.side.proportion" value="0.13663366" />
+    <property name="settings.editor.selected.configurable" value="reference.settings.project.maven.importing" />
   </component>
   <component name="RunManager">
     <configuration name="PFApplication" type="Application" factoryName="Application">
-      <option name="ALTERNATIVE_JRE_PATH" value="17" />
+      <option name="ALTERNATIVE_JRE_PATH" value="21" />
+      <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="true" />
       <option name="MAIN_CLASS_NAME" value="application.PFApplication" />
       <module name="PFGAP" />
       <method v="2">
@@ -59,6 +211,11 @@
       <updated>1755287967401</updated>
     </task>
     <servers />
+  </component>
+  <component name="TerminalProjectNonSharedOptionsProvider">
+    <envs>
+      <env key="JAVA_HOME" value="/usr/lib/jvm/java-21-openjdk-amd64" />
+    </envs>
   </component>
   <component name="Vcs.Log.Tabs.Properties">
     <option name="TAB_STATES">
