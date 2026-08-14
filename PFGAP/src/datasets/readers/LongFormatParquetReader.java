@@ -2,23 +2,17 @@ package datasets.readers;
 
 import core.AppContext;
 import datasets.ListObjectDataset;
-import org.apache.avro.generic.GenericRecord;
-import org.apache.avro.util.Utf8;
+import dev.hardwood.InputFile;
+import dev.hardwood.reader.ParquetFileReader;
+import dev.hardwood.reader.RowReader;
+//import dev.hardwood.schema.ColumnSchema;
+//import dev.hardwood.schema.FileSchema;
+import dev.hardwood.schema.ColumnProjection;
 import org.apache.commons.lang3.time.DurationFormatUtils;
-//import org.apache.hadoop.conf.Configuration;
-//import org.apache.hadoop.fs.Path;
-import org.apache.parquet.avro.AvroParquetReader;
-import org.apache.parquet.hadoop.ParquetReader;
-//import org.apache.parquet.hadoop.util.HadoopInputFile;
-import org.apache.parquet.io.LocalInputFile;
-import java.nio.file.Paths;
-// ignore hadoop errors
-//import org.apache.log4j.BasicConfigurator;
-//import org.apache.log4j.Level;
-//import org.apache.log4j.Logger;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -68,17 +62,10 @@ import java.util.stream.Collectors;
  *      - If labelColumns has one column, label is a scalar Object.
  *      - If labelColumns has multiple columns, label is List<Object>.
  *
- * This mirrors LongFormatReader, but reads typed rows from Parquet using
- * Apache Parquet Avro.
+ * Uses Hardwood for Parquet reading. Hardwood is a lightweight Java
+ * implementation of the Parquet format that does not require Hadoop.
  */
 public class LongFormatParquetReader implements DatasetReader {
-
-    /*static {
-        if (!Logger.getRootLogger().getAllAppenders().hasMoreElements()) {
-            BasicConfigurator.configure();
-            Logger.getRootLogger().setLevel(Level.ERROR);
-        }
-    }*/
 
     private final String dataFileName;
     private final boolean isNumeric;
@@ -120,10 +107,12 @@ public class LongFormatParquetReader implements DatasetReader {
         this.isRegression = isRegression;
         this.idColumn = idColumn;
         this.timeColumn = timeColumn;
+
         this.featureColumns =
                 featureColumns == null
                         ? new ArrayList<>()
                         : new ArrayList<>(featureColumns);
+
         this.labelColumns =
                 labelColumns == null
                         ? new ArrayList<>()
@@ -143,31 +132,32 @@ public class LongFormatParquetReader implements DatasetReader {
 
     public ListObjectDataset readGroupedLongFormatDataset() throws IOException {
 
-        //validateOptions();
-
         long start = System.nanoTime();
 
-        Map<Object, List<LongParquetRow>> groupedRows = new LinkedHashMap<>();
+        Map<Object, List<LongParquetRow>> groupedRows =
+                new LinkedHashMap<>();
 
-        /*Configuration configuration = new Configuration();
-        Path path = new Path(dataFileName);
+        Path path = Paths.get(dataFileName);
 
-        try (ParquetReader<GenericRecord> reader =
-                     AvroParquetReader.<GenericRecord>builder(
-                             HadoopInputFile.fromPath(path, configuration)
-                     ).build()) {*/
+        //try (ParquetFileReader fileReader =
+        //             ParquetFileReader.open(InputFile.of(path));
+        //     RowReader reader = fileReader.rowReader()) {
 
-        try (ParquetReader<GenericRecord> reader =
-                     AvroParquetReader.<GenericRecord>builder(
-                             new LocalInputFile(Paths.get(dataFileName))
-                     ).build()) {
+        try (ParquetFileReader fileReader =
+                     ParquetFileReader.open(InputFile.of(path));
+             RowReader reader =
+                     fileReader.buildRowReader()
+                             .projection(buildColumnProjection())
+                             .build()) {
 
-            GenericRecord record;
             int rowNumber = 0;
 
-            while ((record = reader.read()) != null) {
+            while (reader.hasNext()) {
+                reader.next();
 
-                Object id = normalizeParquetValue(record.get(idColumn));
+                Object id = normalizeValue(
+                        getValue(reader, idColumn)
+                );
 
                 if (id == null) {
                     throw new IllegalArgumentException(
@@ -178,18 +168,31 @@ public class LongFormatParquetReader implements DatasetReader {
                 Object timeValue = null;
 
                 if (timeColumn != null && !timeColumn.trim().isEmpty()) {
-                    timeValue = normalizeParquetValue(record.get(timeColumn));
+                    timeValue = normalizeValue(
+                            getValue(reader, timeColumn)
+                    );
                 }
 
-                Object[] featureValues = new Object[featureColumns.size()];
+                Object[] featureValues =
+                        new Object[featureColumns.size()];
 
                 for (int j = 0; j < featureColumns.size(); j++) {
+
                     String featureColumn = featureColumns.get(j);
-                    Object rawValue = normalizeParquetValue(record.get(featureColumn));
-                    featureValues[j] = parseFeatureValue(rawValue, featureColumn);
+
+                    Object rawValue =
+                            normalizeValue(
+                                    getValue(reader, featureColumn)
+                            );
+
+                    featureValues[j] =
+                            parseFeatureValue(
+                                    rawValue,
+                                    featureColumn
+                            );
                 }
 
-                Object label = parseLabelValues(record);
+                Object label = parseLabelValues(reader);
 
                 LongParquetRow row =
                         new LongParquetRow(
@@ -201,7 +204,10 @@ public class LongFormatParquetReader implements DatasetReader {
                         );
 
                 groupedRows
-                        .computeIfAbsent(id, ignored -> new ArrayList<>())
+                        .computeIfAbsent(
+                                id,
+                                ignored -> new ArrayList<>()
+                        )
                         .add(row);
 
                 ProgressLogger.logProgress(rowNumber);
@@ -209,43 +215,100 @@ public class LongFormatParquetReader implements DatasetReader {
             }
         }
 
-        ListObjectDataset dataset = buildDataset(groupedRows);
+        ListObjectDataset dataset =
+                buildDataset(groupedRows);
 
         long end = System.nanoTime();
+
         ProgressLogger.logDuration(start, end);
 
         return dataset;
     }
 
-    private ListObjectDataset readRowWiseDataset() throws IOException {
+    private ColumnProjection buildColumnProjection() {
+
+        List<String> columns = new ArrayList<>();
+
+        if (idColumn != null &&
+                !idColumn.trim().isEmpty()) {
+
+            columns.add(idColumn);
+        }
+
+        if (timeColumn != null &&
+                !timeColumn.trim().isEmpty()) {
+
+            columns.add(timeColumn);
+        }
+
+        columns.addAll(featureColumns);
+        columns.addAll(labelColumns);
+
+        return ColumnProjection.columns(
+                columns.toArray(new String[0])
+        );
+    }
+
+    private ListObjectDataset readRowWiseDataset()
+            throws IOException {
 
         long start = System.nanoTime();
 
-        ListObjectDataset dataset = new ListObjectDataset();
+        ListObjectDataset dataset =
+                new ListObjectDataset();
 
-        try (ParquetReader<GenericRecord> reader =
-                     AvroParquetReader.<GenericRecord>builder(
-                             new LocalInputFile(Paths.get(dataFileName))
-                     ).build()) {
+        Path path = Paths.get(dataFileName);
 
-            GenericRecord record;
+        //try (ParquetFileReader fileReader =
+        //             ParquetFileReader.open(InputFile.of(path));
+        //     RowReader reader = fileReader.rowReader()) {
+
+        try (ParquetFileReader fileReader =
+                     ParquetFileReader.open(InputFile.of(path));
+             RowReader reader =
+                     fileReader.buildRowReader()
+                             .projection(buildColumnProjection())
+                             .build()) {
+
             int rowIndex = 0;
 
-            while ((record = reader.read()) != null) {
+            while (reader.hasNext()) {
 
-                Object[] featureValues = new Object[featureColumns.size()];
+                reader.next();
 
-                for (int j = 0; j < featureColumns.size(); j++) {
-                    String featureColumn = featureColumns.get(j);
-                    Object rawValue = normalizeParquetValue(record.get(featureColumn));
-                    featureValues[j] = parseFeatureValue(rawValue, featureColumn);
+                Object[] featureValues =
+                        new Object[featureColumns.size()];
+
+                for (int j = 0;
+                     j < featureColumns.size();
+                     j++) {
+
+                    String featureColumn =
+                            featureColumns.get(j);
+
+                    Object rawValue =
+                            normalizeValue(
+                                    getValue(reader, featureColumn)
+                            );
+
+                    featureValues[j] =
+                            parseFeatureValue(
+                                    rawValue,
+                                    featureColumn
+                            );
                 }
 
-                Object label = parseLabelValues(record);
+                Object label =
+                        parseLabelValues(reader);
 
-                Object data = buildRowWiseData(featureValues);
+                Object data =
+                        buildRowWiseData(featureValues);
 
-                dataset.add(label, data, rowIndex);
+                dataset.add(
+                        label,
+                        data,
+                        rowIndex
+                );
 
                 updateGlobalLength(data);
 
@@ -255,30 +318,57 @@ public class LongFormatParquetReader implements DatasetReader {
         }
 
         long end = System.nanoTime();
+
         ProgressLogger.logDuration(start, end);
 
         return dataset;
     }
 
+    /**
+     * Retrieve a Parquet field through Hardwood's typed RowReader API.
+     *
+     * We deliberately return Object here because PF-GAP supports several
+     * kinds of feature/label values and the existing reader normalizes
+     * them afterward.
+     */
+    private static Object getValue(
+            RowReader reader,
+            String columnName
+    ) {
+        if (reader.isNull(columnName)) {
+            return null;
+        }
+
+        return reader.getValue(columnName);
+    }
+
     private ListObjectDataset buildDataset(
             Map<Object, List<LongParquetRow>> groupedRows
     ) {
-
-        ListObjectDataset dataset = new ListObjectDataset();
+        ListObjectDataset dataset =
+                new ListObjectDataset();
 
         int instanceIndex = 0;
 
-        for (Map.Entry<Object, List<LongParquetRow>> entry : groupedRows.entrySet()) {
+        for (Map.Entry<Object, List<LongParquetRow>> entry :
+                groupedRows.entrySet()) {
 
-            List<LongParquetRow> rows = entry.getValue();
+            List<LongParquetRow> rows =
+                    entry.getValue();
 
             sortRows(rows);
 
-            Object label = inferGroupLabel(rows);
+            Object label =
+                    inferGroupLabel(rows);
 
-            Object data = buildSeriesData(rows);
+            Object data =
+                    buildSeriesData(rows);
 
-            dataset.add(label, data, instanceIndex);
+            dataset.add(
+                    label,
+                    data,
+                    instanceIndex
+            );
 
             updateGlobalLength(data);
 
@@ -288,51 +378,84 @@ public class LongFormatParquetReader implements DatasetReader {
         return dataset;
     }
 
-    private Object buildRowWiseData(Object[] featureValues) {
-
+    private Object buildRowWiseData(
+            Object[] featureValues
+    ) {
         int length = featureValues.length;
 
         if (isNumeric) {
 
             if (hasMissingValues) {
-                Double[] data = new Double[length];
+
+                Double[] data =
+                        new Double[length];
 
                 for (int i = 0; i < length; i++) {
-                    data[i] = toBoxedDouble(featureValues[i]);
+                    data[i] =
+                            toBoxedDouble(
+                                    featureValues[i]
+                            );
                 }
 
                 return data;
             }
 
-            double[] data = new double[length];
+            double[] data =
+                    new double[length];
 
             for (int i = 0; i < length; i++) {
-                data[i] = toPrimitiveDouble(featureValues[i]);
+                data[i] =
+                        toPrimitiveDouble(
+                                featureValues[i]
+                        );
             }
 
             return data;
         }
 
-        Object[] data = new Object[length];
+        Object[] data =
+                new Object[length];
 
-        System.arraycopy(featureValues, 0, data, 0, length);
+        System.arraycopy(
+                featureValues,
+                0,
+                data,
+                0,
+                length
+        );
 
         return data;
     }
 
-    private void sortRows(List<LongParquetRow> rows) {
+    private void sortRows(
+            List<LongParquetRow> rows
+    ) {
+        if (timeColumn == null ||
+                timeColumn.trim().isEmpty()) {
 
-        if (timeColumn == null || timeColumn.trim().isEmpty()) {
-            rows.sort(Comparator.comparingInt(row -> row.inputOrder));
+            rows.sort(
+                    Comparator.comparingInt(
+                            row -> row.inputOrder
+                    )
+            );
+
             return;
         }
 
-        rows.sort((a, b) -> compareTimeValues(a.timeValue, b.timeValue));
+        rows.sort(
+                (a, b) ->
+                        compareTimeValues(
+                                a.timeValue,
+                                b.timeValue
+                        )
+        );
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private int compareTimeValues(Object a, Object b) {
-
+    private int compareTimeValues(
+            Object a,
+            Object b
+    ) {
         if (a == null && b == null) {
             return 0;
         }
@@ -345,32 +468,45 @@ public class LongFormatParquetReader implements DatasetReader {
             return 1;
         }
 
-        if (a instanceof Number && b instanceof Number) {
+        if (a instanceof Number &&
+                b instanceof Number) {
+
             return Double.compare(
                     ((Number) a).doubleValue(),
                     ((Number) b).doubleValue()
             );
         }
 
-        if (a instanceof Comparable && a.getClass().isInstance(b)) {
+        if (a instanceof Comparable &&
+                a.getClass().isInstance(b)) {
+
             return ((Comparable) a).compareTo(b);
         }
 
-        return a.toString().compareTo(b.toString());
+        return a.toString()
+                .compareTo(b.toString());
     }
 
-    private Object inferGroupLabel(List<LongParquetRow> rows) {
-
+    private Object inferGroupLabel(
+            List<LongParquetRow> rows
+    ) {
         if (rows.isEmpty()) {
             return null;
         }
 
-        Object firstLabel = rows.get(0).label;
+        Object firstLabel =
+                rows.get(0).label;
 
         for (LongParquetRow row : rows) {
-            if (!labelsEqual(firstLabel, row.label)) {
+
+            if (!labelsEqual(
+                    firstLabel,
+                    row.label
+            )) {
+
                 throw new IllegalArgumentException(
-                        "Inconsistent labels found within long-format Parquet group for id: "
+                        "Inconsistent labels found within "
+                                + "long-format Parquet group for id: "
                                 + row.id
                 );
             }
@@ -379,8 +515,10 @@ public class LongFormatParquetReader implements DatasetReader {
         return firstLabel;
     }
 
-    private boolean labelsEqual(Object a, Object b) {
-
+    private boolean labelsEqual(
+            Object a,
+            Object b
+    ) {
         if (a == null && b == null) {
             return true;
         }
@@ -392,48 +530,75 @@ public class LongFormatParquetReader implements DatasetReader {
         return a.equals(b);
     }
 
-    private Object buildSeriesData(List<LongParquetRow> rows) {
+    private Object buildSeriesData(
+            List<LongParquetRow> rows
+    ) {
+        int timeLength =
+                rows.size();
 
-        int timeLength = rows.size();
-        int dimensionCount = featureColumns.size();
+        int dimensionCount =
+                featureColumns.size();
 
         if (dimensionCount == 1) {
-            return buildUnivariateSeries(rows, timeLength);
+            return buildUnivariateSeries(
+                    rows,
+                    timeLength
+            );
         }
 
-        return buildMultivariateSeries(rows, dimensionCount, timeLength);
+        return buildMultivariateSeries(
+                rows,
+                dimensionCount,
+                timeLength
+        );
     }
 
     private Object buildUnivariateSeries(
             List<LongParquetRow> rows,
             int timeLength
     ) {
-
         if (isNumeric) {
 
             if (hasMissingValues) {
-                Double[] data = new Double[timeLength];
+
+                Double[] data =
+                        new Double[timeLength];
 
                 for (int t = 0; t < timeLength; t++) {
-                    data[t] = toBoxedDouble(rows.get(t).featureValues[0]);
+
+                    data[t] =
+                            toBoxedDouble(
+                                    rows.get(t)
+                                            .featureValues[0]
+                            );
                 }
 
                 return data;
             }
 
-            double[] data = new double[timeLength];
+            double[] data =
+                    new double[timeLength];
 
             for (int t = 0; t < timeLength; t++) {
-                data[t] = toPrimitiveDouble(rows.get(t).featureValues[0]);
+
+                data[t] =
+                        toPrimitiveDouble(
+                                rows.get(t)
+                                        .featureValues[0]
+                        );
             }
 
             return data;
         }
 
-        Object[] data = new Object[timeLength];
+        Object[] data =
+                new Object[timeLength];
 
         for (int t = 0; t < timeLength; t++) {
-            data[t] = rows.get(t).featureValues[0];
+
+            data[t] =
+                    rows.get(t)
+                            .featureValues[0];
         }
 
         return data;
@@ -444,67 +609,113 @@ public class LongFormatParquetReader implements DatasetReader {
             int dimensionCount,
             int timeLength
     ) {
-
         if (isNumeric) {
 
             if (hasMissingValues) {
-                Double[][] data = new Double[dimensionCount][timeLength];
+
+                Double[][] data =
+                        new Double[
+                                dimensionCount
+                                ][timeLength];
 
                 for (int t = 0; t < timeLength; t++) {
-                    LongParquetRow row = rows.get(t);
 
-                    for (int d = 0; d < dimensionCount; d++) {
-                        data[d][t] = toBoxedDouble(row.featureValues[d]);
+                    LongParquetRow row =
+                            rows.get(t);
+
+                    for (int d = 0;
+                         d < dimensionCount;
+                         d++) {
+
+                        data[d][t] =
+                                toBoxedDouble(
+                                        row.featureValues[d]
+                                );
                     }
                 }
 
                 return data;
             }
 
-            double[][] data = new double[dimensionCount][timeLength];
+            double[][] data =
+                    new double[
+                            dimensionCount
+                            ][timeLength];
 
             for (int t = 0; t < timeLength; t++) {
-                LongParquetRow row = rows.get(t);
 
-                for (int d = 0; d < dimensionCount; d++) {
-                    data[d][t] = toPrimitiveDouble(row.featureValues[d]);
+                LongParquetRow row =
+                        rows.get(t);
+
+                for (int d = 0;
+                     d < dimensionCount;
+                     d++) {
+
+                    data[d][t] =
+                            toPrimitiveDouble(
+                                    row.featureValues[d]
+                            );
                 }
             }
 
             return data;
         }
 
-        Object[][] data = new Object[dimensionCount][timeLength];
+        Object[][] data =
+                new Object[
+                        dimensionCount
+                        ][timeLength];
 
         for (int t = 0; t < timeLength; t++) {
-            LongParquetRow row = rows.get(t);
 
-            for (int d = 0; d < dimensionCount; d++) {
-                data[d][t] = row.featureValues[d];
+            LongParquetRow row =
+                    rows.get(t);
+
+            for (int d = 0;
+                 d < dimensionCount;
+                 d++) {
+
+                data[d][t] =
+                        row.featureValues[d];
             }
         }
 
         return data;
     }
 
-    private Object parseLabelValues(GenericRecord record) {
-
+    private Object parseLabelValues(
+            RowReader reader
+    ) {
         if (labelColumns.isEmpty()) {
             return null;
         }
 
         if (labelColumns.size() == 1) {
+
             return parseLabelValue(
-                    normalizeParquetValue(record.get(labelColumns.get(0)))
+                    normalizeValue(
+                            getValue(
+                                    reader,
+                                    labelColumns.get(0)
+                            )
+                    )
             );
         }
 
-        List<Object> labels = new ArrayList<>();
+        List<Object> labels =
+                new ArrayList<>();
 
-        for (String labelColumn : labelColumns) {
+        for (String labelColumn :
+                labelColumns) {
+
             labels.add(
                     parseLabelValue(
-                            normalizeParquetValue(record.get(labelColumn))
+                            normalizeValue(
+                                    getValue(
+                                            reader,
+                                            labelColumn
+                                    )
+                            )
                     )
             );
         }
@@ -516,8 +727,8 @@ public class LongFormatParquetReader implements DatasetReader {
             Object value,
             String featureColumn
     ) {
-
         if (value == null) {
+
             if (hasMissingValues) {
                 return null;
             }
@@ -536,8 +747,9 @@ public class LongFormatParquetReader implements DatasetReader {
         return parseGenericValue(value);
     }
 
-    private Object parseLabelValue(Object value) {
-
+    private Object parseLabelValue(
+            Object value
+    ) {
         if (value == null) {
             return null;
         }
@@ -551,9 +763,13 @@ public class LongFormatParquetReader implements DatasetReader {
         }
 
         if (value instanceof Long) {
-            long longValue = (Long) value;
 
-            if (longValue >= Integer.MIN_VALUE && longValue <= Integer.MAX_VALUE) {
+            long longValue =
+                    (Long) value;
+
+            if (longValue >= Integer.MIN_VALUE &&
+                    longValue <= Integer.MAX_VALUE) {
+
                 return (int) longValue;
             }
 
@@ -561,18 +777,23 @@ public class LongFormatParquetReader implements DatasetReader {
         }
 
         if (value instanceof Number) {
-            double doubleValue = ((Number) value).doubleValue();
 
-            if (doubleValue == Math.rint(doubleValue)
+            double doubleValue =
+                    ((Number) value).doubleValue();
+
+            if (doubleValue ==
+                    Math.rint(doubleValue)
                     && doubleValue >= Integer.MIN_VALUE
                     && doubleValue <= Integer.MAX_VALUE) {
+
                 return (int) doubleValue;
             }
 
             return doubleValue;
         }
 
-        String trimmed = value.toString().trim();
+        String trimmed =
+                value.toString().trim();
 
         if (MissingValueParser.isMissing(trimmed)) {
             return null;
@@ -580,37 +801,47 @@ public class LongFormatParquetReader implements DatasetReader {
 
         try {
             return Integer.parseInt(trimmed);
+
         } catch (NumberFormatException ignored) {
+
             try {
-                double parsed = Double.parseDouble(trimmed);
+
+                double parsed =
+                        Double.parseDouble(trimmed);
 
                 if (parsed == Math.rint(parsed)
                         && parsed >= Integer.MIN_VALUE
                         && parsed <= Integer.MAX_VALUE) {
+
                     return (int) parsed;
                 }
 
                 return parsed;
+
             } catch (NumberFormatException ignoredAgain) {
                 return trimmed;
             }
         }
     }
 
-    private static Object parseGenericValue(Object value) {
-
+    private static Object parseGenericValue(
+            Object value
+    ) {
         if (value == null) {
             return null;
         }
 
-        Object normalized = normalizeParquetValue(value);
+        Object normalized =
+                normalizeValue(value);
 
         if (normalized == null) {
             return null;
         }
 
         if (normalized instanceof String) {
-            String trimmed = normalized.toString().trim();
+
+            String trimmed =
+                    normalized.toString().trim();
 
             if (MissingValueParser.isMissing(trimmed)) {
                 return null;
@@ -618,10 +849,12 @@ public class LongFormatParquetReader implements DatasetReader {
 
             try {
                 return Double.parseDouble(trimmed);
+
             } catch (NumberFormatException e1) {
 
                 if (trimmed.equalsIgnoreCase("true")
                         || trimmed.equalsIgnoreCase("false")) {
+
                     return Boolean.parseBoolean(trimmed);
                 }
 
@@ -633,53 +866,37 @@ public class LongFormatParquetReader implements DatasetReader {
     }
 
     /**
-     * Converts Avro/Parquet-specific values into ordinary Java values where
-     * practical.
-     *
-     * Common conversions:
-     *
-     *      Utf8       -> String
-     *      ByteBuffer -> byte[]
-     *
-     * Other values are returned unchanged.
+     * Hardwood already returns ordinary Java values, so no Avro-specific
+     * normalization is normally required.
      */
-    private static Object normalizeParquetValue(Object value) {
-
-        if (value == null) {
-            return null;
-        }
-
-        if (value instanceof Utf8) {
-            return value.toString();
-        }
-
-        if (value instanceof ByteBuffer) {
-            ByteBuffer buffer = ((ByteBuffer) value).duplicate();
-            byte[] bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
-            return bytes;
-        }
-
+    private static Object normalizeValue(
+            Object value
+    ) {
         return value;
     }
 
-    private static Double toBoxedDouble(Object value) {
-
+    private static Double toBoxedDouble(
+            Object value
+    ) {
         if (value == null) {
             return null;
         }
 
-        Object normalized = normalizeParquetValue(value);
+        Object normalized =
+                normalizeValue(value);
 
         if (normalized == null) {
             return null;
         }
 
         if (normalized instanceof Number) {
-            return ((Number) normalized).doubleValue();
+
+            return ((Number) normalized)
+                    .doubleValue();
         }
 
-        String trimmed = normalized.toString().trim();
+        String trimmed =
+                normalized.toString().trim();
 
         if (MissingValueParser.isMissing(trimmed)) {
             return null;
@@ -688,25 +905,34 @@ public class LongFormatParquetReader implements DatasetReader {
         return Double.valueOf(trimmed);
     }
 
-    private static double toPrimitiveDouble(Object value) {
-
+    private static double toPrimitiveDouble(
+            Object value
+    ) {
         if (value == null) {
+
             throw new IllegalArgumentException(
-                    "Encountered null numeric value, but hasMissingValues=false."
+                    "Encountered null numeric value, "
+                            + "but hasMissingValues=false."
             );
         }
 
-        Object normalized = normalizeParquetValue(value);
+        Object normalized =
+                normalizeValue(value);
 
         if (normalized instanceof Number) {
-            return ((Number) normalized).doubleValue();
+
+            return ((Number) normalized)
+                    .doubleValue();
         }
 
-        String trimmed = normalized.toString().trim();
+        String trimmed =
+                normalized.toString().trim();
 
         if (MissingValueParser.isMissing(trimmed)) {
+
             throw new IllegalArgumentException(
-                    "Encountered missing numeric value, but hasMissingValues=false."
+                    "Encountered missing numeric value, "
+                            + "but hasMissingValues=false."
             );
         }
 
@@ -715,50 +941,71 @@ public class LongFormatParquetReader implements DatasetReader {
 
     private void validateOptions() {
 
-        if (dataFileName == null || dataFileName.trim().isEmpty()) {
+        if (dataFileName == null ||
+                dataFileName.trim().isEmpty()) {
+
             throw new IllegalArgumentException(
                     "LongFormatParquetReader requires dataFileName."
             );
         }
 
-        if (featureColumns == null || featureColumns.isEmpty()) {
+        if (featureColumns == null ||
+                featureColumns.isEmpty()) {
+
             throw new IllegalArgumentException(
-                    "LongFormatParquetReader requires at least one feature column."
+                    "LongFormatParquetReader requires "
+                            + "at least one feature column."
             );
         }
     }
 
-    private static void updateGlobalLength(Object data) {
-
+    private static void updateGlobalLength(
+            Object data
+    ) {
         if (data instanceof double[]) {
-            AppContext.length = ((double[]) data).length;
+
+            AppContext.length =
+                    ((double[]) data).length;
 
         } else if (data instanceof Double[]) {
-            AppContext.length = ((Double[]) data).length;
+
+            AppContext.length =
+                    ((Double[]) data).length;
 
         } else if (data instanceof double[][]) {
-            double[][] matrix = (double[][]) data;
+
+            double[][] matrix =
+                    (double[][]) data;
 
             if (matrix.length > 0) {
-                AppContext.length = matrix[0].length;
+                AppContext.length =
+                        matrix[0].length;
             }
 
         } else if (data instanceof Double[][]) {
-            Double[][] matrix = (Double[][]) data;
+
+            Double[][] matrix =
+                    (Double[][]) data;
 
             if (matrix.length > 0) {
-                AppContext.length = matrix[0].length;
+                AppContext.length =
+                        matrix[0].length;
             }
 
         } else if (data instanceof Object[][]) {
-            Object[][] matrix = (Object[][]) data;
+
+            Object[][] matrix =
+                    (Object[][]) data;
 
             if (matrix.length > 0) {
-                AppContext.length = matrix[0].length;
+                AppContext.length =
+                        matrix[0].length;
             }
 
         } else if (data instanceof Object[]) {
-            AppContext.length = ((Object[]) data).length;
+
+            AppContext.length =
+                    ((Object[]) data).length;
         }
     }
 
@@ -790,20 +1037,25 @@ public class LongFormatParquetReader implements DatasetReader {
         private static Set<String> missingIndicators =
                 AppContext.MissingStrings;
 
-        public static void setMissingIndicators(Set<String> indicators) {
+        public static void setMissingIndicators(
+                Set<String> indicators
+        ) {
             missingIndicators =
                     indicators.stream()
                             .map(String::toUpperCase)
                             .collect(Collectors.toSet());
         }
 
-        public static boolean isMissing(String token) {
-
+        public static boolean isMissing(
+                String token
+        ) {
             if (token == null) {
                 return true;
             }
 
-            return missingIndicators.contains(token.trim().toUpperCase());
+            return missingIndicators.contains(
+                    token.trim().toUpperCase()
+            );
         }
     }
 
@@ -814,14 +1066,21 @@ public class LongFormatParquetReader implements DatasetReader {
             if (i % 1000 == 0) {
 
                 if (i % 100000 == 0) {
+
                     System.out.print("\n");
 
                     if (i % 1000000 == 0) {
+
                         long usedMem =
                                 AppContext.runtime.totalMemory()
                                         - AppContext.runtime.freeMemory();
 
-                        System.out.print(i + ":" + usedMem / 1024 / 1024 + "mb\n");
+                        System.out.print(
+                                i
+                                        + ":"
+                                        + usedMem / 1024 / 1024
+                                        + "mb\n"
+                        );
                     }
 
                 } else {
@@ -830,9 +1089,12 @@ public class LongFormatParquetReader implements DatasetReader {
             }
         }
 
-        public static void logDuration(long start, long end) {
-
-            long elapsed = end - start;
+        public static void logDuration(
+                long start,
+                long end
+        ) {
+            long elapsed =
+                    end - start;
 
             String timeDuration =
                     DurationFormatUtils.formatDuration(
@@ -840,7 +1102,10 @@ public class LongFormatParquetReader implements DatasetReader {
                             "H:m:s.SSS"
                     );
 
-            System.out.println("finished in " + timeDuration);
+            System.out.println(
+                    "finished in "
+                            + timeDuration
+            );
         }
     }
 }
