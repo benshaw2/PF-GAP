@@ -77,5 +77,9 @@ public enum ReaderType {
      * This is lower priority than long-format Parquet but useful enough
      * to reserve as an explicit reader type.
      */
-    NESTED_PARQUET
+    NESTED_PARQUET,
+    LAZY_PER_FILE_PARQUET,
+    PER_FILE_PARQUET,
+    PER_FILE_DELIMITED,
+    LAZY_PER_FILE_DELIMITED,
 }

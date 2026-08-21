@@ -1,11 +1,16 @@
 package core;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 //import core.contracts.Dataset;
 //import distance.elastic.MEASURE;
-import core.contracts.ObjectDataset;
+import core.contracts.*;
 import datasets.readers.ReaderType;
+import datasets.readers.lazy.LazySeriesReader;
+import datasets.readers.lazy.LazySeriesReaderFactory;
+import datasets.readers.lazy.LazySeriesReaderSpec;
+import datasets.readers.lazy.LazySeriesRef;
 import distance.MEASURE;
 import imputation.initial.Imputer;
 import imputation.initial.MeanImpute;
@@ -47,7 +52,9 @@ public class AppContext {
 	public static String training_labels = null; // sometimes this is inferred from training_file.
 	public static String testing_labels = null; // sometimes this is inferred from testing_file.
 
-	public static ReaderType readerType = null;
+	public static ReaderType readerType = ReaderType.DELIMITED; //null;
+	public static ReaderType trainingReaderType = null;
+	public static ReaderType testingReaderType = null;
 	public static String id_column = null;
 	public static String time_column = null;
 	public static List<String> feature_columns = new ArrayList<>();
@@ -158,6 +165,14 @@ public class AppContext {
 	public static Map<Integer, Map<Integer, Double>> training_proximities_sparse;
 	public static Map<Integer, Map<Integer, Double>> testing_training_proximities_sparse;
 
+	// lazy data
+	// public static LazySeriesReader lazySeriesReader = null;
+	public static boolean isLazyDataset = false;
+	// public static String perFileDataPath = null;
+	public static String file_pattern = null;
+	public static String trainingFilePattern = null;
+	public static String testingFilePattern = null;
+
 	//static {
 	//	rand = new Random();
 	//}
@@ -226,5 +241,220 @@ public class AppContext {
 
 	public static boolean useBootstrapTrees() {
 		return bootstrap_trees;
+	}
+
+	//public static Map<String, LazySeriesReader> lazySeriesReaders =
+	//		new HashMap<>();
+
+	private static final Map<String, LazySeriesReader>
+			lazySeriesReaders =
+			new ConcurrentHashMap<>();
+
+	public static void registerLazySeriesReaderSpec(
+			LazySeriesReaderSpec spec
+	) {
+		if (spec == null) {
+			throw new IllegalArgumentException(
+					"LazySeriesReaderSpec cannot be null."
+			);
+		}
+
+		lazySeriesReaderSpecs.put(
+				spec.getReaderKey(),
+				spec
+		);
+	}
+
+	public static void registerLazySeriesReader(
+			LazySeriesReaderSpec spec
+	) {
+		if (spec == null) {
+			throw new IllegalArgumentException(
+					"LazySeriesReaderSpec cannot be null."
+			);
+		}
+
+		LazySeriesReader reader =
+				LazySeriesReaderFactory.create(spec);
+
+		lazySeriesReaderSpecs.put(
+				spec.getReaderKey(),
+				spec
+		);
+
+		lazySeriesReaders.put(
+				spec.getReaderKey(),
+				reader
+		);
+	}
+
+	public static Map<String, LazySeriesReaderSpec>
+	getLazySeriesReaderSpecsSnapshot() {
+		return new LinkedHashMap<>(
+				lazySeriesReaderSpecs
+		);
+	}
+
+	public static void restoreLazySeriesReaderSpecs(
+			Map<String, LazySeriesReaderSpec> specs
+	) {
+		lazySeriesReaders.clear();
+		lazySeriesReaderSpecs.clear();
+
+		if (specs == null || specs.isEmpty()) {
+			return;
+		}
+
+		for (LazySeriesReaderSpec spec : specs.values()) {
+			registerLazySeriesReader(spec);
+		}
+	}
+
+	public static void clearLazySeriesReaders() {
+		lazySeriesReaders.clear();
+		lazySeriesReaderSpecs.clear();
+	}
+
+	//public static void registerLazySeriesReader(
+	//		String key,
+	//		LazySeriesReader reader
+	//) {
+	//	isLazyDataset = true;
+	//	lazySeriesReaders.put(key, reader);
+	//}
+
+	public static void registerLazySeriesReader(
+			String readerKey,
+			LazySeriesReader reader
+	) {
+		if (readerKey == null || readerKey.isBlank()) {
+			throw new IllegalArgumentException(
+					"Lazy reader key cannot be null or blank."
+			);
+		}
+
+		if (reader == null) {
+			throw new IllegalArgumentException(
+					"LazySeriesReader cannot be null."
+			);
+		}
+
+		lazySeriesReaders.put(
+				readerKey,
+				reader
+		);
+	}
+
+	public static LazySeriesReader getLazySeriesReader(
+			String key
+	) {
+		LazySeriesReader reader =
+				lazySeriesReaders.get(key);
+
+		if (reader == null) {
+			throw new IllegalStateException(
+					"No LazySeriesReader registered for key: " + key
+			);
+		}
+
+		return reader;
+	}
+
+	private static final Map<String, LazySeriesReaderSpec>
+			lazySeriesReaderSpecs =
+			new ConcurrentHashMap<>();
+
+	//public static void clearLazySeriesReaders() {
+	//	isLazyDataset = false;
+	//	lazySeriesReaders.clear();
+	//}
+
+	/*public static LazySeriesReader getDefaultLazySeriesReader() {
+		if (lazySeriesReaders.size() == 1) {
+			return lazySeriesReaders.values().iterator().next();
+		}
+
+		throw new IllegalStateException(
+				"Multiple LazySeriesReaders are registered. "
+						+ "Custom LazyDistanceFunction currently requires "
+						+ "a single lazy reader configuration."
+		);
+	}*/
+
+	public static Object readLazySeries(
+			LazySeriesRef ref
+	) {
+		if (ref == null) {
+			throw new IllegalArgumentException(
+					"Cannot resolve a null LazySeriesRef."
+			);
+		}
+
+		return getLazySeriesReader(
+				ref.getReaderKey()
+		).read(ref);
+	}
+
+	public static ReaderType getTrainingReaderType() {
+		ReaderType effectiveReaderType =
+				trainingReaderType != null
+						? trainingReaderType
+						: readerType;
+
+		if (effectiveReaderType == null) {
+			throw new IllegalStateException(
+					"No training reader type was configured. "
+							+ "Use -reader_type or -train_reader_type."
+			);
+		}
+
+		return effectiveReaderType;
+	}
+
+	public static ReaderType getTestingReaderType() {
+		ReaderType effectiveReaderType =
+				testingReaderType != null
+						? testingReaderType
+						: readerType;
+
+		if (effectiveReaderType == null) {
+			throw new IllegalStateException(
+					"No testing reader type was configured. "
+							+ "Use -reader_type or -test_reader_type."
+			);
+		}
+
+		return effectiveReaderType;
+	}
+
+	public static String getTrainingFilePattern() {
+		return trainingFilePattern != null
+				? trainingFilePattern
+				: file_pattern;
+	}
+
+	public static String getTestingFilePattern() {
+		return testingFilePattern != null
+				? testingFilePattern
+				: file_pattern;
+	}
+
+	public static Map<String, LazySeriesReaderSpec>
+	getModelLazySeriesReaderSpecsSnapshot() {
+
+		Map<String, LazySeriesReaderSpec> result =
+				new LinkedHashMap<>();
+
+		LazySeriesReaderSpec trainSpec =
+				lazySeriesReaderSpecs.get("train");
+
+		if (trainSpec != null) {
+			result.put(
+					trainSpec.getReaderKey(),
+					trainSpec
+			);
+		}
+
+		return result;
 	}
 }

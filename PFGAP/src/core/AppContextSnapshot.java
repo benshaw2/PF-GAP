@@ -1,5 +1,6 @@
 package core;
 
+import datasets.readers.lazy.LazySeriesReaderSpec;
 import distance.MEASURE;
 
 import java.io.Serializable;
@@ -20,6 +21,11 @@ public class AppContextSnapshot implements Serializable {
     //public String testing_file;
     public String training_labels;
     //public String testing_labels;
+
+    public Map<String, LazySeriesReaderSpec>
+            lazySeriesReaderSpecs =
+            new LinkedHashMap<>();
+
     public boolean is2D;
     public boolean isNumeric;
     //public boolean hasMissingValues;
@@ -54,13 +60,13 @@ public class AppContextSnapshot implements Serializable {
     //public String modelname;
     public MEASURE[] userdistances;
     public List<String[]> Descriptors;
-    public HashSet<String> MissingStrings;
+    public HashSet<String> MissingStrings; // this might change on a test set
     public Map<Integer, Object> meta_predictions;
     //public boolean parallelTrees;
     //public boolean parallelProx;
     //public boolean parallelPredict;
     public int max_depth;
-    public boolean impute_train;
+    // public boolean impute_train; // is this really needed?
     //public boolean impute_test;
     //public boolean exists_testlabels;
     public boolean useSparseProximities;

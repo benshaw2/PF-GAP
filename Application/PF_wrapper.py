@@ -59,6 +59,44 @@ def _proximity_type_arg(value):
             )
             
     return value
+    
+def _normalized_reader_type(value):
+    if value is None:
+        return None
+
+    return str(value).strip().upper()
+
+
+def _validate_lazy_reader_options(
+    reader_type,
+    file_pattern,
+    impute_training_data=False,
+    impute_testing_data=False,
+    return_imputed_training=False,
+    return_imputed_testing=False,
+):
+    normalized = _normalized_reader_type(reader_type)
+
+    if normalized != "PER_FILE_PARQUET":
+        return
+
+    if file_pattern is None or not str(file_pattern).strip():
+        raise ValueError(
+            "reader_type='PER_FILE_PARQUET' requires file_pattern. "
+            "Example: 'series_{num:04d}.parquet'."
+        )
+
+    if (
+        impute_training_data
+        or impute_testing_data
+        or return_imputed_training
+        or return_imputed_testing
+    ):
+        raise ValueError(
+            "Imputation is not currently supported for lazy "
+            "PER_FILE_PARQUET datasets. Disable imputation and "
+            "imputed-data output options."
+        )
         
 
 def train(
@@ -122,6 +160,7 @@ def train(
     label_columns=None,
     hdf5_dataset_path="/X",
     hdf5_label_dataset_path="/y",
+    file_pattern=None,
 
     # Other outputs/model controls
     return_training_outlier_scores=False,
@@ -175,6 +214,15 @@ def train(
 
     if return_imputed_testing and not impute_testing_data:
         impute_testing_data = True
+        
+    _validate_lazy_reader_options(
+        reader_type=reader_type,
+        file_pattern=file_pattern,
+        impute_training_data=impute_training_data,
+        impute_testing_data=impute_testing_data,
+        return_imputed_training=return_imputed_training,
+        return_imputed_testing=return_imputed_testing,
+    )
         
     model_name = os.path.basename(os.path.normpath(str(model_name)))
 
@@ -247,6 +295,7 @@ def train(
     _append_common_distance_arg(msgList, "missing_proximity_distances", missing_proximity_distances)
     
     _append_if_not_none(msgList, "reader_type", reader_type)
+    _append_if_not_none(msgList, "file_pattern", file_pattern)
     _append_if_not_none(msgList, "id_column", id_column)
     _append_if_not_none(msgList, "time_column", time_column)
 
@@ -294,6 +343,7 @@ def predict(
     entry_separator=",",
     array_separator=":",
     reader_type=None,
+    file_pattern=None,
     id_column=None,
     time_column=None,
     feature_columns=None,
@@ -332,6 +382,13 @@ def predict(
     # you must impute the data if you want imputed data returned.
     if return_imputed_testing and not impute_testing_data:
         impute_testing_data = True
+        
+    _validate_lazy_reader_options(
+        reader_type=reader_type,
+        file_pattern=file_pattern,
+        impute_testing_data=impute_testing_data,
+        return_imputed_testing=return_imputed_testing,
+    )
 
     if gap_update is None:
         gap_update = "dtw_alignment" if DTWImpute else "standard"
@@ -371,6 +428,7 @@ def predict(
 
         "-initial_imputer=" + initial_imputer,
         "-hasMissingValues=" + _bool(has_missing_values),
+        "-perform_test_imputation=" + _bool(impute_testing_data),
         "-numImputes=" + str(impute_iterations),
         "-impute_test=" + _bool(return_imputed_testing),
 
@@ -386,6 +444,7 @@ def predict(
     _append_common_distance_arg(msgList, "missing_proximity_distances", missing_proximity_distances)
     
     _append_if_not_none(msgList, "reader_type", reader_type)
+    _append_if_not_none(msgList, "file_pattern", file_pattern)
     _append_if_not_none(msgList, "id_column", id_column)
     _append_if_not_none(msgList, "time_column", time_column)
 

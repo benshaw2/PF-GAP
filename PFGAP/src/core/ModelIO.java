@@ -109,14 +109,21 @@ public class ModelIO {
         AppContext.purity_measure = snapshot.purity_measure;
         //AppContext.isRegression = snapshot.isRegression;
         if (snapshot.forest_mode != null) {
-            AppContext.forest_mode = snapshot.forest_mode;
+            AppContext.forest_mode =
+                    snapshot.forest_mode;
 
-            AppContext.isRegression = "regression".equalsIgnoreCase(snapshot.forest_mode);
+            AppContext.isRegression =
+                    "regression".equalsIgnoreCase(
+                            snapshot.forest_mode
+                    );
         } else {
-            // Backward compatibility for older saved models.
-            AppContext.forest_mode = AppContext.isRegression
-                    ? "regression"
-                    : "classification";
+            AppContext.isRegression =
+                    snapshot.isRegression;
+
+            AppContext.forest_mode =
+                    snapshot.isRegression
+                            ? "regression"
+                            : "classification";
         }
         AppContext.voting = snapshot.voting;
         AppContext.purity_threshold = snapshot.purity_threshold;
@@ -137,18 +144,22 @@ public class ModelIO {
         //AppContext.get_predictions = snapshot.get_predictions;
         //AppContext.modelname = snapshot.modelname;
         AppContext.userdistances = snapshot.userdistances;
-        AppContext.Descriptors = snapshot.Descriptors;
+        AppContext.Descriptors = snapshot.Descriptors; // this one might not be right...
         AppContext.meta_predictions = snapshot.meta_predictions;
-        AppContext.MissingStrings = snapshot.MissingStrings;
+        //AppContext.MissingStrings = snapshot.MissingStrings;
         //AppContext.parallelTrees = snapshot.parallelTrees;
         //AppContext.parallelProx = snapshot.parallelProx;
         //AppContext.parallelPredict = snapshot.parallelPredict;
         AppContext.max_depth = snapshot.max_depth;
-        AppContext.impute_train = snapshot.impute_train;
+        //AppContext.impute_train = snapshot.impute_train;
         //AppContext.impute_test = snapshot.impute_test;
         //AppContext.exists_testlabels = snapshot.exists_testlabels;
         AppContext.useSparseProximities = snapshot.useSparseProximities;
         AppContext.setDatasetName(snapshot.datasetName);
+
+        AppContext.restoreLazySeriesReaderSpecs(
+                snapshot.lazySeriesReaderSpecs
+        );
     }
 
     public static class LoadedModel {

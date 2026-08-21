@@ -257,7 +257,28 @@ public class PFApplication {
 				case "-reader_type":
 					AppContext.readerType = parseReaderType(options[1]);
 					break;
+				case "-file_pattern":
+					AppContext.file_pattern = parseNullableString(options[1]);
+					break;
+				case "-train_reader_type":
+					AppContext.trainingReaderType =
+							parseReaderType(options[1]);
+					break;
 
+				case "-test_reader_type":
+					AppContext.testingReaderType =
+							parseReaderType(options[1]);
+					break;
+
+				case "-train_file_pattern":
+					AppContext.trainingFilePattern =
+							parseNullableString(options[1]);
+					break;
+
+				case "-test_file_pattern":
+					AppContext.testingFilePattern =
+							parseNullableString(options[1]);
+					break;
 				case "-id_column":
 					AppContext.id_column = parseNullableString(options[1]);
 					break;
