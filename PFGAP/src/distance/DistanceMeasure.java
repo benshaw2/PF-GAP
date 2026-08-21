@@ -7,8 +7,10 @@ import java.util.List;
 import java.util.Random;
 
 import core.AppContext;
+import datasets.readers.lazy.LazySeriesRef;
 import core.contracts.ObjectDataset;
 import distance.api.DistanceFunction;
+import distance.api.LazyDistanceFunction;
 import distance.elastic.*;
 import distance.graph.*;
 import distance.interop.*;
@@ -425,6 +427,13 @@ public class DistanceMeasure implements Serializable {
 	}
 
 	public void select_random_params(ObjectDataset d, Random r) {
+		// sometimes we can't get random parameters on a lazy dataset
+		// so we need a safe fallback in case.
+		/*if (AppContext.isLazyDataset) {
+			selectLazyCompatibleParams(r);
+			return;
+		}*/
+
 		switch (this.distance_measure) {
 		case euclidean:
 		case shifazEUCLIDEAN:
@@ -459,7 +468,7 @@ public class DistanceMeasure implements Serializable {
 			break;
 		case dtw:
 		case shifazDTW:
-			this.windowSizeDTW = d.length();	
+			this.windowSizeDTW = -1; //d.length();
 			break;
 		case dtwcv:
 		case shifazDTWCV:
@@ -467,10 +476,10 @@ public class DistanceMeasure implements Serializable {
 			break;
 		case ddtw:
 		case shifazDDTW:
-			this.windowSizeDDTW = d.length();	
+			this.windowSizeDDTW = -1; //d.length();
 			break;
 		case shapeHoG1dDTW:
-			this.windowSizeDDTW = d.length();
+			this.windowSizeDDTW = -1; //d.length();
 			break;
 		case ddtwcv:
 		case shifazDDTWCV:
@@ -505,11 +514,49 @@ public class DistanceMeasure implements Serializable {
 				break;
 			case shapeHoGdtw:
 			case shifazShapeHoGDTW:
-				this.windowSizeDDTW = d.length();
+				this.windowSizeDDTW = -1; //d.length();
 				break;
 		default:
 //			throw new Exception("Unknown distance measure");
 //			break;
+		}
+	}
+
+	private void selectLazyCompatibleParams(
+			Random r
+	) {
+		switch (this.distance_measure) {
+			case euclidean:
+			case shifazEUCLIDEAN:
+			case dtw:
+			case shifazDTW:
+			case ddtw:
+			case shifazDDTW:
+			case dtw_i:
+			case dtw_d:
+			case ddtw_i:
+			case shifazDDTW_I:
+			case ddtw_d:
+			case shapeHoG1dDTW:
+			case shapeHoGdtw:
+			case shifazShapeHoGDTW:
+			case shapeHoGdtw_d:
+				/*
+				 * These use no data-derived random parameter in the current
+				 * full-window configuration.
+				 */
+				windowSizeDTW = -1;
+				windowSizeDDTW = -1;
+				break;
+
+			default:
+				throw new UnsupportedOperationException(
+						"Distance measure "
+								+ distance_measure
+								+ " currently requires parameter selection from "
+								+ "materialized dataset data and is not yet supported "
+								+ "with lazy datasets."
+				);
 		}
 	}
 
@@ -518,6 +565,22 @@ public class DistanceMeasure implements Serializable {
 	}
 
 	public double distance(Object s, Object t, double bsf) throws IOException, InterruptedException {
+		/*
+		 * Special case: user-provided Java distances may implement
+		 * LazyDistanceFunction. If so, let the user distance decide how and when
+		 * to load the series.
+		 */
+		if (this.distance_measure == MEASURE.javadistance) {
+			return computeJavaDistance(s, t);
+		}
+
+		/*
+		* Resolving an eager object is a no-op. Resolving a LazySeriesRef
+		* loads that series exactly once for this distance call.
+		*/
+		s = resolveIfLazy(s);
+		t = resolveIfLazy(t);
+
 		double distance = Double.POSITIVE_INFINITY;
 		
 		switch (this.distance_measure) {
@@ -551,7 +614,8 @@ public class DistanceMeasure implements Serializable {
 			break;
 		case dtw:
 		case shifazDTW:
-			distance = dtw.distance(s, t, bsf, ((double[]) s).length);
+			//distance = dtw.distance(s, t, bsf, ((double[]) s).length);
+			distance = dtw.distance(s, t, bsf, resolveWindowSize(s, t, this.windowSizeDTW));
 			break;
 		case dtwcv:
 		case shifazDTWCV:
@@ -559,7 +623,8 @@ public class DistanceMeasure implements Serializable {
 			break;
 		case ddtw:
 		case shifazDDTW:
-			distance = ddtw.distance(s, t, bsf, ((double[]) s).length);
+			//distance = ddtw.distance(s, t, bsf, ((double[]) s).length);
+			distance = ddtw.distance(s, t, bsf, resolveWindowSize(s, t, this.windowSizeDDTW));
 			break;
 		case ddtwcv:
 		case shifazDDTWCV:
@@ -576,7 +641,8 @@ public class DistanceMeasure implements Serializable {
 			//distance = PythonDistance.distance(s,t);
 			break;
 		case javadistance:
-			distance = distanceFunction.compute(s,t);
+			//distance = distanceFunction.compute(s,t);
+			distance = computeJavaDistance(s,t);
 			break;
 		case manhattan:
 			distance = manhattan.distance(s,t,bsf);
@@ -603,114 +669,120 @@ public class DistanceMeasure implements Serializable {
 			distance = dtwarow_d.distance(s,t,bsf);
 			break;
 		case dtw_i:
-			distance = dtw_i.distance(s,t,bsf,((double[][]) s).length);
+			//distance = dtw_i.distance(s,t,bsf,((double[][]) s).length);
+			distance = dtw_i.distance(s,t,bsf, resolveWindowSize(s,t,this.windowSizeDTW));
 			break;
 		case dtw_d:
-			distance = dtw_d.distance(s,t,bsf,((double[][]) s).length);
+			//distance = dtw_d.distance(s,t,bsf,((double[][]) s).length);
+			distance = dtw_d.distance(s,t,bsf, resolveWindowSize(s,t,this.windowSizeDTW));
 			break;
-			case ddtw_i:
-			case shifazDDTW_I:
-				distance = ddtw_i.distance(s, t, bsf, ((double[][]) s).length);
-				break;
-			case wdtw_i:
-			case shifazWDTW_I:
-				distance = wdtw_i.distance(s, t, bsf, this.weightWDTW);
-				break;
-			case wddtw_i:
-			case shifazWDDTW_I:
-				distance = wddtw_i.distance(s, t, bsf, this.weightWDDTW);
-				break;
-			case twe_i:
-			case shifazTWE_I:
-				distance = twe_i.distance(s, t, bsf, this.nuTWE, this.lambdaTWE);
-				break;
-			case erp_i:
-			case shifazERP_I:
-				distance = erp_i.distance(s, t, bsf, this.windowSizeERP, this.gERP);
-				break;
-			case euclidean_i:
-			case shifazEUCLIDEAN_I:
-				distance = euclidean_i.distance(s, t, bsf);
-				break;
-			case lcss_i:
-			case shifazLCSS_I:
-				distance = lcss_i.distance(s, t, bsf, this.windowSizeLCSS, this.epsilonLCSS);
-				break;
-			case msm_i:
-			case shifazMSM_I:
-				distance = msm_i.distance(s, t, bsf, this.cMSM);
-				break;
-			case manhattan_i:
-			case shifazMANHATTAN_I:
-				distance = manhattan_i.distance(s, t, bsf);
-				break;
-			case cid_i:
-			case shifazCID_I:
-				distance = cid_i.distance(s, t, bsf);
-				break;
-			case sbd_i:
-			case shifazSBD_I:
-				distance = sbd_i.distance(s, t);
-				break;
-			case shapeHoGdtw:
-			case shifazShapeHoGDTW:
-				distance = shapeHoGdtw.distance(s, t, bsf, ((double[][]) s).length);
-				break;
+		case ddtw_i:
+		case shifazDDTW_I:
+			//distance = ddtw_i.distance(s, t, bsf, ((double[][]) s).length);
+			distance = ddtw_i.distance(s,t,bsf, resolveWindowSize(s,t,this.windowSizeDDTW));
+			break;
+		case wdtw_i:
+		case shifazWDTW_I:
+			distance = wdtw_i.distance(s, t, bsf, this.weightWDTW);
+			break;
+		case wddtw_i:
+		case shifazWDDTW_I:
+			distance = wddtw_i.distance(s, t, bsf, this.weightWDDTW);
+			break;
+		case twe_i:
+		case shifazTWE_I:
+			distance = twe_i.distance(s, t, bsf, this.nuTWE, this.lambdaTWE);
+			break;
+		case erp_i:
+		case shifazERP_I:
+			distance = erp_i.distance(s, t, bsf, this.windowSizeERP, this.gERP);
+			break;
+		case euclidean_i:
+		case shifazEUCLIDEAN_I:
+			distance = euclidean_i.distance(s, t, bsf);
+			break;
+		case lcss_i:
+		case shifazLCSS_I:
+			distance = lcss_i.distance(s, t, bsf, this.windowSizeLCSS, this.epsilonLCSS);
+			break;
+		case msm_i:
+		case shifazMSM_I:
+			distance = msm_i.distance(s, t, bsf, this.cMSM);
+			break;
+		case manhattan_i:
+		case shifazMANHATTAN_I:
+			distance = manhattan_i.distance(s, t, bsf);
+			break;
+		case cid_i:
+		case shifazCID_I:
+			distance = cid_i.distance(s, t, bsf);
+			break;
+		case sbd_i:
+		case shifazSBD_I:
+			distance = sbd_i.distance(s, t);
+			break;
+		case shapeHoGdtw:
+		case shifazShapeHoGDTW:
+			//distance = shapeHoGdtw.distance(s, t, bsf, ((double[][]) s).length);
+			distance = shapeHoGdtw.distance(s,t,bsf, resolveWindowSize(s,t,this.windowSizeDTW));
+			break;
 
-			case ddtw_d:
-				distance = ddtw_d.distance(s, t, bsf, ((double[][]) s).length);
-				break;
-			case wdtw_d:
-				distance = wdtw_d.distance(s, t, bsf, this.weightWDTW);
-				break;
-			case wddtw_d:
-				distance = wddtw_d.distance(s, t, bsf, this.weightWDDTW);
-				break;
-			case shapeHoGdtw_d:
-				distance = shapeHoGdtw_d.distance(s, t, bsf, ((double[][]) s).length);
-				break;
-			//case euclidean_d:
-			//	distance = euclidean_d.distance(s, t, bsf);
-			//	break;
-			//case manhattan_d:
-			//	distance = manhattan_d.distance(s, t, bsf);
-			case approximateGraphEditDistance:
-				distance = approximateGraphEditDistance.compute(s,t);
-				break;
-			case graphEditDistance:
-				distance = approximateGraphEditDistance.compute(s,t);
-				break;
-			case graphletDistance:
-				distance = graphletDistance.compute(s,t);
-				break;
-			case hammingDistance:
-				distance = hammingDistance.compute(s,t);
-				break;
-			case shortestPathDistance:
-				distance = shortestPathDistance.compute(s,t);
-				break;
-			case wlDistance:
-				distance = wlDistance.compute(s,t);
-				break;
-			case wlDistance2:
-				distance = wlDistance2.compute(s,t);
-				break;
-			case meta_classmatch:
-				distance = meta_classmatch.distance(s,t);
-				break;
-			case meta_file_classmatch:
-				distance = meta_file_classmatch.distance(s,t);
-				break;
-			case meta_regression:
-				distance = meta_regression.distance(s,t);
-				break;
-			case meta_file_regression:
-				distance = meta_file_regression.distance(s,t);
-				break;
+		case ddtw_d:
+			//distance = ddtw_d.distance(s, t, bsf, ((double[][]) s).length);
+			distance = ddtw_d.distance(s,t,bsf, resolveWindowSize(s,t,this.windowSizeDDTW));
+			break;
+		case wdtw_d:
+			distance = wdtw_d.distance(s, t, bsf, this.weightWDTW);
+			break;
+		case wddtw_d:
+			distance = wddtw_d.distance(s, t, bsf, this.weightWDDTW);
+			break;
+		case shapeHoGdtw_d:
+			//distance = shapeHoGdtw_d.distance(s, t, bsf, ((double[][]) s).length);
+			distance = shapeHoGdtw_d.distance(s,t,bsf, resolveWindowSize(s,t,this.windowSizeDDTW));
+			break;
+		//case euclidean_d:
+		//	distance = euclidean_d.distance(s, t, bsf);
+		//	break;
+		//case manhattan_d:
+		//	distance = manhattan_d.distance(s, t, bsf);
+		case approximateGraphEditDistance:
+			distance = approximateGraphEditDistance.compute(s,t);
+			break;
+		case graphEditDistance:
+			distance = approximateGraphEditDistance.compute(s,t);
+			break;
+		case graphletDistance:
+			distance = graphletDistance.compute(s,t);
+			break;
+		case hammingDistance:
+			distance = hammingDistance.compute(s,t);
+			break;
+		case shortestPathDistance:
+			distance = shortestPathDistance.compute(s,t);
+			break;
+		case wlDistance:
+			distance = wlDistance.compute(s,t);
+			break;
+		case wlDistance2:
+			distance = wlDistance2.compute(s,t);
+			break;
+		case meta_classmatch:
+			distance = meta_classmatch.distance(s,t);
+			break;
+		case meta_file_classmatch:
+			distance = meta_file_classmatch.distance(s,t);
+			break;
+		case meta_regression:
+			distance = meta_regression.distance(s,t);
+			break;
+		case meta_file_regression:
+			distance = meta_file_regression.distance(s,t);
+			break;
 
-			default:
-//			throw new Exception("Unknown distance measure");
-//			break;
+		default:
+//		throw new Exception("Unknown distance measure");
+//		break;
 		}
 		if (distance == Double.POSITIVE_INFINITY) {
 			System.out.println("error ***********");
@@ -823,6 +895,126 @@ public class DistanceMeasure implements Serializable {
 		
 		int r = AppContext.getRand().nextInt(closest_nodes.size());
 		return closest_nodes.get(r);
+	}
+
+	// for lazy datasets: resolve before passing to distances
+	private boolean isLazyObject(Object obj) {
+		return obj instanceof LazySeriesRef;
+	}
+
+	private Object resolveIfLazy(Object obj) {
+		if (obj instanceof LazySeriesRef ref) {
+
+			//return AppContext.lazySeriesReader.read(ref);
+			return AppContext
+					.getLazySeriesReader(ref.getReaderKey())
+					.read(ref);
+		}
+
+		return obj;
+	}
+
+	private double computeJavaDistance(
+			Object s,
+			Object t
+	) {
+		if (distanceFunction == null) {
+			throw new IllegalStateException(
+					"DistanceFunction is null for javadistance measure."
+			);
+		}
+
+		if (distanceFunction instanceof LazyDistanceFunction lazyDistance) {
+
+			return lazyDistance.compute(
+					s,
+					t,
+					AppContext::readLazySeries
+			);
+		}
+
+		/*if (AppContext.isLazyDataset ||
+				isLazyObject(s) ||
+				isLazyObject(t)) {
+
+			Object resolvedS = resolveIfLazy(s);
+			Object resolvedT = resolveIfLazy(t);
+
+			return distanceFunction.compute(resolvedS, resolvedT);
+		}*/
+
+		Object resolvedS = resolveIfLazy(s);
+		Object resolvedT = resolveIfLazy(t);
+
+		//return distanceFunction.compute(s, t);
+		return distanceFunction.compute(resolvedS, resolvedT);
+	}
+
+
+	private int timeLengthOf(Object series) {
+		if (series instanceof double[] x) {
+			return x.length;
+		}
+
+		if (series instanceof Double[] x) {
+			return x.length;
+		}
+
+		if (series instanceof double[][] x) {
+			return x.length == 0 ? 0 : x[0].length;
+		}
+
+		if (series instanceof Double[][] x) {
+			return x.length == 0 ? 0 : x[0].length;
+		}
+
+		if (series instanceof Object[][] x) {
+			return x.length == 0 ? 0 : x[0].length;
+		}
+
+		if (series instanceof Object[] x) {
+			return x.length;
+		}
+
+		throw new IllegalArgumentException(
+				"Cannot infer time length from series type: "
+						+ series.getClass().getName()
+		);
+	}
+
+	private int dimensionCountOf(Object series) {
+		if (series instanceof double[][] x) {
+			return x.length;
+		}
+
+		if (series instanceof Double[][] x) {
+			return x.length;
+		}
+
+		if (series instanceof Object[][] x) {
+			return x.length;
+		}
+
+		return 1;
+	}
+
+	private int fullWindow(Object s, Object t) {
+		return Math.max(
+				timeLengthOf(s),
+				timeLengthOf(t)
+		);
+	}
+
+	private int resolveWindowSize(
+			Object s,
+			Object t,
+			int configuredWindow
+	) {
+		if (configuredWindow > 0) {
+			return configuredWindow;
+		}
+
+		return -1;
 	}
 	
 	

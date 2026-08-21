@@ -1,5 +1,6 @@
 package core;
 
+import datasets.readers.lazy.LazySeriesRef;
 import datasets.ListObjectDataset;
 import datasets.readers.*;
 import imputation.util.MissingIndicesBuilder;
@@ -46,6 +47,9 @@ public class ExperimentRunner {
 		ListObjectDataset testDataOriginal = AppContext.testing_file != null
 				? readTestData()
 				: null;
+
+		// currently we don't support imputation on lazy datasets.
+		validateDatasetCapabilities(trainDataOriginal, testDataOriginal);
 
 		train_data = prepareTrainingData(trainDataOriginal);
 
@@ -127,6 +131,8 @@ public class ExperimentRunner {
 		AppContext.setTraining_data(trainData);
 
 		ListObjectDataset testDataOriginal = readTestData();
+		// no imputation on lazy datasets, currently
+		validateDatasetCapabilities(trainData, testDataOriginal);
 		test_data = prepareTestingData(
 				testDataOriginal,
 				trainData._get_initial_class_labels()
@@ -152,6 +158,11 @@ public class ExperimentRunner {
 				);
 			}
 
+			if (AppContext.isIsolationMode()) {
+				handleIsolationScores(forest, test_data, trainData.size(), "IsolationScores_saved.txt");
+				continue;
+			}
+
 			ProximityForestResult result = forest.test(test_data);
 
 			if (!AppContext.perform_test_imputation) {
@@ -162,10 +173,10 @@ public class ExperimentRunner {
 				writeTestingData();
 			}
 
-			if (AppContext.isIsolationMode()) {
-				handleIsolationScores(forest, test_data, trainData.size(), "IsolationScores_saved.txt");
-				continue;
-			}
+			//if (AppContext.isIsolationMode()) {
+			//	handleIsolationScores(forest, test_data, trainData.size(), "IsolationScores_saved.txt");
+			//	continue;
+			//}
 
 			if (AppContext.getprox) {
 				computeAndWriteTestTrainProximities(forest, trainData);
@@ -185,10 +196,16 @@ public class ExperimentRunner {
 		}
 	}
 
-	private ReaderOptions buildBaseReaderOptions(String dataPath) {
+	private ReaderOptions buildBaseReaderOptions(ReaderType readerType, String filePattern) { //(String dataPath) {
+
+		if (readerType == null) {
+			throw new IllegalArgumentException(
+					"A reader type must be specified."
+			);
+		}
 
 		return new ReaderOptions()
-				.setReaderType(resolveReaderType(dataPath))
+				.setReaderType(readerType)
 				.setEntrySeparator(AppContext.entry_separator)
 				.setArraySeparator(AppContext.array_separator)
 				.setHasHeader(AppContext.csv_has_header)
@@ -202,66 +219,18 @@ public class ExperimentRunner {
 				.setFeatureColumns(AppContext.feature_columns)
 				.setLabelColumns(AppContext.label_columns)
 				.setHdf5DatasetPath(AppContext.hdf5_dataset_path)
-				.setHdf5LabelDatasetPath(AppContext.hdf5_label_dataset_path);
+				.setHdf5LabelDatasetPath(AppContext.hdf5_label_dataset_path)
+				.setFilePattern(filePattern);
 	}
 
-	private ReaderType resolveReaderType(String path) {
-
-		if (AppContext.readerType != null) {
-			return AppContext.readerType;
-		}
-
-		if (path == null) {
-			return ReaderType.DELIMITED;
-		}
-
-		String lower = path.toLowerCase();
-
-		if (lower.endsWith(".ts")) {
-			return ReaderType.TS;
-		}
-
-		/*
-		 * Important:
-		 *
-		 * We do not infer LONG_FORMAT_DELIMITED from .csv/.tsv/.txt,
-		 * because those extensions are ambiguous.
-		 *
-		 * A .csv file may be ordinary row-wise data or long-format time-series data.
-		 * Users should specify:
-		 *
-		 *      -reader_type=LONG_FORMAT_DELIMITED
-		 *
-		 * when they want long-format parsing.
-		 */
-		if (lower.endsWith(".csv")
-				|| lower.endsWith(".tsv")
-				|| lower.endsWith(".txt")) {
-			return ReaderType.DELIMITED;
-		}
-
-		/*
-		 * Parquet is less ambiguous for now because the only Parquet reader
-		 * currently implemented is long-format Parquet.
-		 *
-		 * Later, if NESTED_PARQUET is implemented, explicit reader_type should
-		 * be preferred for all Parquet files too.
-		 */
-		if (lower.endsWith(".parquet")) {
-			return ReaderType.LONG_FORMAT_PARQUET;
-		}
-
-		if (lower.endsWith(".h5") || lower.endsWith(".hdf5")) {
-			return ReaderType.HDF5;
-		}
-
-		return ReaderType.DELIMITED;
-	}
 
 	private ListObjectDataset readTrainingData() throws IOException {
 
 		ReaderOptions trainOptions =
-				buildBaseReaderOptions(AppContext.training_file)
+				buildBaseReaderOptions(
+						AppContext.getTrainingReaderType(),
+						AppContext.getTrainingFilePattern()
+				) //(AppContext.training_file)
 						.setDataPath(AppContext.training_file)
 						.setLabelPath(AppContext.training_labels)
 						.setTest(false);
@@ -275,7 +244,10 @@ public class ExperimentRunner {
 	private ListObjectDataset readTestData() throws IOException {
 
 		ReaderOptions testOptions =
-				buildBaseReaderOptions(AppContext.testing_file)
+				buildBaseReaderOptions(
+						AppContext.getTestingReaderType(),
+						AppContext.getTestingFilePattern()
+				) //(AppContext.testing_file)
 						.setDataPath(AppContext.testing_file)
 						.setLabelPath(AppContext.testing_labels)
 						.setTest(true);
@@ -297,7 +269,7 @@ public class ExperimentRunner {
 			prepared = original;
 		}
 
-		if (AppContext.hasMissingValues) {
+		if (AppContext.hasMissingValues && !isLazyDataset(prepared)) {
 			prepared.setMissingIndices(
 					MissingIndicesBuilder.buildFromDataset(prepared.getData())
 			);
@@ -318,7 +290,7 @@ public class ExperimentRunner {
 			prepared = original;
 		}
 
-		if (AppContext.hasMissingValues) {
+		if (AppContext.hasMissingValues && !isLazyDataset(prepared)) {
 			prepared.setMissingIndices(
 					MissingIndicesBuilder.buildFromDataset(prepared.getData())
 			);
@@ -604,4 +576,81 @@ public class ExperimentRunner {
 				.getName()
 				.replaceAll("_TRAIN.txt", "");
 	}
+
+	private void validateDatasetCapabilities(
+			ListObjectDataset trainData,
+			ListObjectDataset testData
+	) {
+		boolean lazyTraining = isLazyDataset(trainData);
+		boolean lazyTesting = isLazyDataset(testData);
+
+		if (!lazyTraining && !lazyTesting) {
+			return;
+		}
+
+		if (AppContext.perform_train_imputation
+				|| AppContext.perform_test_imputation
+				|| AppContext.impute_train
+				|| AppContext.impute_test) {
+
+			throw new UnsupportedOperationException(
+					"Imputation is not currently supported for lazy datasets. "
+							+ "Disable perform_train_imputation, perform_test_imputation, "
+							+ "impute_train, and impute_test when using a lazy reader."
+			);
+		}
+
+		if (lazyTraining != lazyTesting && trainData != null && testData != null) {
+			System.out.println(
+					"Warning: training and testing datasets use different storage modes. "
+							+ "One dataset is lazy and the other is materialized."
+			);
+		}
+	}
+
+	private boolean isLazyDataset(ListObjectDataset dataset) {
+		if (dataset == null) {
+			return false;
+		}
+
+		for (Object value : dataset.getData()) {
+			if (value != null) {
+				return value instanceof LazySeriesRef;
+			}
+		}
+
+		return false;
+	}
+
+	// here is a stricter check (not needed if no mixing can happen)
+
+	/*private boolean isLazyDataset(ListObjectDataset dataset) {
+		if (dataset == null) {
+			return false;
+		}
+
+		boolean foundLazy = false;
+		boolean foundMaterialized = false;
+
+		for (Object value : dataset.getData()) {
+			if (value == null) {
+				continue;
+			}
+
+			if (value instanceof LazySeriesRef) {
+				foundLazy = true;
+			} else {
+				foundMaterialized = true;
+			}
+
+			if (foundLazy && foundMaterialized) {
+				throw new IllegalStateException(
+						"A ListObjectDataset cannot mix lazy references "
+								+ "and materialized instances."
+				);
+			}
+		}
+
+		return foundLazy;
+	}*/
 }

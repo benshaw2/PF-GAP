@@ -1,5 +1,8 @@
 package datasets.readers;
 
+import datasets.readers.lazy.LazyPerFileDelimitedReader;
+import datasets.readers.lazy.LazyPerFileParquetReader;
+
 import java.util.Objects;
 
 /**
@@ -58,6 +61,22 @@ public final class DatasetReaderFactory {
             case NESTED_PARQUET:
                 throw new UnsupportedOperationException(
                         "NESTED_PARQUET reader has not been implemented yet."
+                );
+
+            case LAZY_PER_FILE_PARQUET:
+                return new LazyPerFileParquetReader(options);
+
+            case PER_FILE_PARQUET:
+                return new PerFileParquetReader(options);
+
+            case PER_FILE_DELIMITED:
+                return new PerFileDelimitedReader(
+                        options
+                );
+
+            case LAZY_PER_FILE_DELIMITED:
+                return new LazyPerFileDelimitedReader(
+                        options
                 );
 
             default:
