@@ -5,6 +5,7 @@ import datasets.ListObjectDataset;
 import datasets.readers.DatasetReader;
 import datasets.readers.ReaderOptions;
 import datasets.readers.ReaderType;
+import preprocessing.standardization.StandardizationStats;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -72,6 +73,7 @@ public class LazyPerFileParquetReader implements DatasetReader {
     private final List<String> labelColumns;
     private final String readerKey;
     private final String filePattern;
+    private final StandardizationStats standardizationStats;
 
     public LazyPerFileParquetReader(ReaderOptions options) {
         this(
@@ -83,7 +85,8 @@ public class LazyPerFileParquetReader implements DatasetReader {
                 options.getFeatureColumns(),
                 options.getLabelColumns(),
                 options.isTest() ? "test" : "train",
-                options.getFilePattern()
+                options.getFilePattern(),
+                options.getStandardizationStats()
         );
     }
 
@@ -96,7 +99,8 @@ public class LazyPerFileParquetReader implements DatasetReader {
             List<String> featureColumns,
             List<String> labelColumns,
             String readerKey,
-            String filePattern
+            String filePattern,
+            StandardizationStats standardizationStats
     ) {
         this.dataPath = dataPath;
         this.isNumeric = isNumeric;
@@ -126,6 +130,8 @@ public class LazyPerFileParquetReader implements DatasetReader {
                 filePattern == null || filePattern.isBlank()
                         ? null
                         : filePattern.trim();
+
+        this.standardizationStats = standardizationStats;
     }
 
     @Override
@@ -152,7 +158,8 @@ public class LazyPerFileParquetReader implements DatasetReader {
                         timeColumn,
                         featureColumns,
                         isNumeric,
-                        hasMissingValues
+                        hasMissingValues,
+                        standardizationStats
                 );
 
         AppContext.registerLazySeriesReader(

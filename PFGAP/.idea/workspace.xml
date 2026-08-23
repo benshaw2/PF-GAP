@@ -16,10 +16,15 @@
       <change beforePath="$PROJECT_DIR$/src/core/AppContextUtils.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContextUtils.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/ModelIO.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ModelIO.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/ListObjectDataset.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/ListObjectDataset.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/DatasetReaderFactory.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/DatasetReaderFactory.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/ReaderType.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/ReaderType.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/DistanceMeasure.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedSeriesReader.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/PerFileParquetSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/PerFileParquetSeriesReader.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/ReaderOptions.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/ReaderOptions.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileDelimitedReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileDelimitedReader.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileParquetReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyPerFileParquetReader.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderFactory.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderFactory.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderSpec.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderSpec.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/distance/interop/MapleDistance.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/distance/interop/MapleDistance.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/preprocessing/OneHotEncoder.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/preprocessing/OneHotEncoder.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -29,8 +34,8 @@
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
-        <option value="Enum" />
         <option value="Interface" />
+        <option value="Enum" />
         <option value="Class" />
       </list>
     </option>

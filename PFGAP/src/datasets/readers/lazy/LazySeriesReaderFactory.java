@@ -27,7 +27,8 @@ public final class LazySeriesReaderFactory {
                             spec.getTimeColumn(),
                             spec.getFeatureColumns(),
                             spec.isNumeric(),
-                            spec.hasMissingValues()
+                            spec.hasMissingValues(),
+                            spec.getStandardizationStats()
                     );
 
             case LAZY_PER_FILE_DELIMITED ->
@@ -37,7 +38,8 @@ public final class LazySeriesReaderFactory {
                             spec.getTimeColumn(),
                             spec.getFeatureColumns(),
                             spec.isNumeric(),
-                            spec.hasMissingValues()
+                            spec.hasMissingValues(),
+                            spec.getStandardizationStats()
                     );
 
             default ->

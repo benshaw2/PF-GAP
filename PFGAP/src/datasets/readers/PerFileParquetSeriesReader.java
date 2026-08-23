@@ -7,6 +7,8 @@ import dev.hardwood.InputFile;
 import dev.hardwood.reader.ParquetFileReader;
 import dev.hardwood.reader.RowReader;
 import dev.hardwood.schema.ColumnProjection;
+import preprocessing.standardization.StandardizationStats;
+import preprocessing.standardization.Standardizer;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -29,6 +31,26 @@ public class PerFileParquetSeriesReader implements LazySeriesReader {
     private final List<String> featureColumns;
     private final boolean isNumeric;
     private final boolean hasMissingValues;
+    private final StandardizationStats standardizationStats;
+
+    public PerFileParquetSeriesReader(
+            String timeColumn,
+            List<String> featureColumns,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            StandardizationStats standardizationStats
+    ) {
+        this.timeColumn = timeColumn;
+
+        this.featureColumns =
+                featureColumns == null
+                        ? new ArrayList<>()
+                        : new ArrayList<>(featureColumns);
+
+        this.isNumeric = isNumeric;
+        this.hasMissingValues = hasMissingValues;
+        this.standardizationStats = standardizationStats;
+    }
 
     public PerFileParquetSeriesReader(
             String timeColumn,
@@ -45,6 +67,7 @@ public class PerFileParquetSeriesReader implements LazySeriesReader {
 
         this.isNumeric = isNumeric;
         this.hasMissingValues = hasMissingValues;
+        this.standardizationStats = null;
     }
 
     @Override
@@ -132,7 +155,17 @@ public class PerFileParquetSeriesReader implements LazySeriesReader {
 
         sortRows(rows);
 
-        return buildSeriesData(rows);
+        Object series =
+                buildSeriesData(rows);
+
+        if (standardizationStats != null) {
+            Standardizer.transformInstanceInPlace(
+                    series,
+                    standardizationStats
+            );
+        }
+
+        return series;
     }
 
     private ColumnProjection buildColumnProjection() {
@@ -476,6 +509,23 @@ public class PerFileParquetSeriesReader implements LazySeriesReader {
         }
 
         return Double.parseDouble(trimmed);
+    }
+
+    private void validateStandardizationConfiguration() {
+        if (standardizationStats == null) {
+            return;
+        }
+
+        if (!isNumeric) {
+            throw new IllegalArgumentException(
+                    "Standardization statistics cannot be applied by "
+                            + "PerFileParquetSeriesReader when isNumeric=false."
+            );
+        }
+
+        standardizationStats.validateFeatureCompatibility(
+                featureColumns
+        );
     }
 
     private static class PerFileParquetRow {

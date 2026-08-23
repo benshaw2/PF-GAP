@@ -6,6 +6,10 @@ import datasets.readers.ReaderType;
 import distance.DistanceRegistry;
 import distance.MEASURE;
 import imputation.initial.*;
+import preprocessing.standardization.StandardizationConfig;
+import preprocessing.standardization.StandardizationMethod;
+import preprocessing.standardization.StandardizationScope;
+import preprocessing.standardization.VarianceConvention;
 import proximities.ProximityType;
 import util.GeneralUtilities;
 import util.PrintUtilities;
@@ -199,7 +203,27 @@ public class PFApplication {
 			//Integer testint = Integer.parseInt("2 3 3.444"[0]);
 			//some default settings are specified in the AppContext class but here we
 			//override the default settings using the provided command line arguments
+
+			// set some before the switch case:
 			String imputerType = null;
+			StandardizationMethod standardizationMethod =
+					StandardizationMethod.NONE;
+
+			StandardizationScope standardizationScope =
+					StandardizationScope.PER_DIMENSION;
+
+			VarianceConvention standardizationVariance =
+					VarianceConvention.POPULATION;
+
+			String standardizationStatsPath =
+					null;
+
+			boolean saveStandardizationStats =
+					false;
+
+			String standardizationStatsOutput =
+					null;
+
 			for (int i = 0; i < args.length; i++) {
 				//String[] options = args[i].trim().split("=");
 				String[] options = args[i].trim().split("=", 2);
@@ -300,6 +324,47 @@ public class PFApplication {
 				case "-hdf5_label_dataset_path":
 					AppContext.hdf5_label_dataset_path = parseNullableString(options[1]);
 					break;
+				case "-standardization":
+					standardizationMethod =
+							StandardizationMethod.fromString(
+									options[1]
+							);
+					break;
+
+				case "-standardization_scope":
+					standardizationScope =
+							StandardizationScope.fromString(
+									options[1]
+							);
+					break;
+
+				case "-standardization_variance":
+					standardizationVariance =
+							VarianceConvention.fromString(
+									options[1]
+							);
+					break;
+
+				case "-standardization_stats":
+					standardizationStatsPath =
+							parseNullableString(
+									options[1]
+							);
+					break;
+
+				case "-save_standardization_stats":
+					saveStandardizationStats =
+							Boolean.parseBoolean(
+									options[1]
+							);
+					break;
+
+					case "-standardization_stats_output":
+						standardizationStatsOutput =
+								parseNullableString(
+										options[1]
+								);
+						break;
 				case "-isRegression":
 					AppContext.isRegression = Boolean.parseBoolean(options[1]);
 					break;
@@ -715,6 +780,30 @@ public class PFApplication {
 						break;
 				}
 			}
+
+			AppContext.standardizationConfig =
+					StandardizationConfig.builder()
+							.setMethod(
+									standardizationMethod
+							)
+							.setScope(
+									standardizationScope
+							)
+							.setVarianceConvention(
+									standardizationVariance
+							)
+							.setStatisticsPath(
+									standardizationStatsPath
+							)
+							.setSaveFittedStatistics(
+									saveStandardizationStats
+							)
+							.setStatisticsOutputPath(
+									standardizationStatsOutput
+							)
+							.build();
+
+			AppContext.standardizationConfig.requireImplemented();
 
 			if (AppContext.warmup_java) {
 				GeneralUtilities.warmUpJavaRuntime();

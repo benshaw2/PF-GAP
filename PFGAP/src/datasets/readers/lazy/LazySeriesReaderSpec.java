@@ -1,6 +1,7 @@
 package datasets.readers.lazy;
 
 import datasets.readers.ReaderType;
+import preprocessing.standardization.StandardizationStats;
 
 import java.io.Serial;
 import java.io.Serializable;
@@ -29,6 +30,7 @@ public final class LazySeriesReaderSpec implements Serializable {
     private final boolean hasMissingValues;
     private final String entrySeparator;
     private final boolean hasHeader;
+    private final StandardizationStats standardizationStats;
 
     public LazySeriesReaderSpec(
             String readerKey,
@@ -38,7 +40,8 @@ public final class LazySeriesReaderSpec implements Serializable {
             boolean numeric,
             boolean hasMissingValues,
             String entrySeparator,
-            boolean hasHeader
+            boolean hasHeader,
+            StandardizationStats standardizationStats
     ) {
         if (readerKey == null || readerKey.isBlank()) {
             throw new IllegalArgumentException(
@@ -63,6 +66,29 @@ public final class LazySeriesReaderSpec implements Serializable {
         this.hasMissingValues = hasMissingValues;
         this.entrySeparator = entrySeparator;
         this.hasHeader = hasHeader;
+        this.standardizationStats = standardizationStats;
+    }
+
+    public LazySeriesReaderSpec(
+            String readerKey,
+            ReaderType readerType,
+            String timeColumn,
+            List<String> featureColumns,
+            boolean numeric,
+            boolean hasMissingValues,
+            StandardizationStats standardizationStats
+    ) {
+        this(
+                readerKey,
+                readerType,
+                timeColumn,
+                featureColumns,
+                numeric,
+                hasMissingValues,
+                null,
+                false,
+                standardizationStats
+        );
     }
 
     public LazySeriesReaderSpec(
@@ -81,7 +107,8 @@ public final class LazySeriesReaderSpec implements Serializable {
                 numeric,
                 hasMissingValues,
                 null,
-                false
+                false,
+                null
         );
     }
 
@@ -115,6 +142,14 @@ public final class LazySeriesReaderSpec implements Serializable {
 
     public boolean hasHeader() {
         return hasHeader;
+    }
+
+    public StandardizationStats getStandardizationStats() {
+        return standardizationStats;
+    }
+
+    public boolean hasStandardizationStats() {
+        return standardizationStats != null;
     }
 
     @Override

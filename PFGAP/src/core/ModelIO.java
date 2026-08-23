@@ -1,6 +1,7 @@
 package core;
 
 import datasets.ListObjectDataset;
+import preprocessing.standardization.StandardizationConfig;
 import trees.ProximityForest;
 
 import java.io.*;
@@ -160,6 +161,30 @@ public class ModelIO {
         AppContext.restoreLazySeriesReaderSpecs(
                 snapshot.lazySeriesReaderSpecs
         );
+
+        AppContext.standardizationConfig =
+                snapshot.standardizationConfig == null
+                        ? StandardizationConfig.disabled()
+                        : snapshot.standardizationConfig;
+
+        AppContext.standardizationStats =
+                snapshot.standardizationStats;
+
+        // optional validation
+        if (AppContext.standardizationConfig.isEnabled()
+                && AppContext.standardizationStats == null) {
+
+            throw new IllegalStateException(
+                    "The saved model enables standardization but does not contain "
+                            + "fitted standardization statistics."
+            );
+        }
+
+        if (AppContext.standardizationStats != null) {
+            AppContext.standardizationConfig.validateStatistics(
+                    AppContext.standardizationStats
+            );
+        }
     }
 
     public static class LoadedModel {

@@ -2,6 +2,8 @@ package core;
 
 import datasets.readers.lazy.LazySeriesReaderSpec;
 import distance.MEASURE;
+import preprocessing.standardization.StandardizationConfig;
+import preprocessing.standardization.StandardizationStats;
 
 import java.io.Serializable;
 import java.util.*;
@@ -74,4 +76,8 @@ public class AppContextSnapshot implements Serializable {
 
     // Optional: if needed for label restoration
     public Map<Object, Integer> initialClassLabels;
+
+    public StandardizationConfig standardizationConfig = StandardizationConfig.disabled();
+
+    public StandardizationStats standardizationStats = null;
 }

@@ -6,6 +6,7 @@ import datasets.ListObjectDataset;
 import datasets.readers.DatasetReader;
 import datasets.readers.ReaderOptions;
 import datasets.readers.ReaderType;
+import preprocessing.standardization.StandardizationStats;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -91,6 +92,7 @@ public class LazyPerFileDelimitedReader implements DatasetReader {
     private final List<String> labelColumns;
     private final String filePattern;
     private final String readerKey;
+    private final StandardizationStats standardizationStats;
 
     public LazyPerFileDelimitedReader(
             ReaderOptions options
@@ -106,7 +108,8 @@ public class LazyPerFileDelimitedReader implements DatasetReader {
                 options.getFeatureColumns(),
                 options.getLabelColumns(),
                 options.getFilePattern(),
-                options.isTest() ? "test" : "train"
+                options.isTest() ? "test" : "train",
+                options.getStandardizationStats()
         );
     }
 
@@ -121,7 +124,8 @@ public class LazyPerFileDelimitedReader implements DatasetReader {
             List<String> featureColumns,
             List<String> labelColumns,
             String filePattern,
-            String readerKey
+            String readerKey,
+            StandardizationStats standardizationStats
     ) {
         this.dataPath =
                 normalizeNullableString(dataPath);
@@ -166,6 +170,8 @@ public class LazyPerFileDelimitedReader implements DatasetReader {
 
         this.readerKey =
                 readerKey;
+
+        this.standardizationStats = standardizationStats;
     }
 
     @Override
@@ -194,7 +200,8 @@ public class LazyPerFileDelimitedReader implements DatasetReader {
                         isNumeric,
                         hasMissingValues,
                         entrySeparator,
-                        hasHeader
+                        hasHeader,
+                        standardizationStats
                 );
 
         AppContext.registerLazySeriesReader(

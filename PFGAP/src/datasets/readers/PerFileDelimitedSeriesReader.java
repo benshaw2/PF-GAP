@@ -3,6 +3,8 @@ package datasets.readers;
 import core.AppContext;
 import datasets.readers.lazy.LazySeriesReader;
 import datasets.readers.lazy.LazySeriesRef;
+import preprocessing.standardization.StandardizationStats;
+import preprocessing.standardization.Standardizer;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -85,6 +87,48 @@ public class PerFileDelimitedSeriesReader
     private final List<String> featureColumns;
     private final boolean isNumeric;
     private final boolean hasMissingValues;
+    private final StandardizationStats standardizationStats;
+
+    public PerFileDelimitedSeriesReader(
+            String entrySeparator,
+            boolean hasHeader,
+            String timeColumn,
+            List<String> featureColumns,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            StandardizationStats standardizationStats
+    ) {
+        if (entrySeparator == null || entrySeparator.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "PerFileDelimitedSeriesReader requires a non-empty "
+                            + "entry separator."
+            );
+        }
+
+        this.entrySeparator =
+                normalizeSeparator(entrySeparator);
+
+        this.hasHeader =
+                hasHeader;
+
+        this.timeColumn =
+                normalizeNullableString(timeColumn);
+
+        this.featureColumns =
+                featureColumns == null
+                        ? new ArrayList<>()
+                        : new ArrayList<>(featureColumns);
+
+        this.isNumeric =
+                isNumeric;
+
+        this.hasMissingValues =
+                hasMissingValues;
+
+        this.standardizationStats = standardizationStats;
+
+        validateStandardizationConfiguration();
+    }
 
     public PerFileDelimitedSeriesReader(
             String entrySeparator,
@@ -120,6 +164,8 @@ public class PerFileDelimitedSeriesReader
 
         this.hasMissingValues =
                 hasMissingValues;
+
+        this.standardizationStats = null;
     }
 
     /**
@@ -249,26 +295,40 @@ public class PerFileDelimitedSeriesReader
                 );
             }
 
+            Object series;
+
             if (isNumeric) {
                 if (hasMissingValues) {
-                    return materializeBoxedNumeric(
-                            file,
-                            rows,
-                            selection.featureIndices
-                    );
+                    series =
+                            materializeBoxedNumeric(
+                                    file,
+                                    rows,
+                                    selection.featureIndices
+                            );
+                } else {
+                    series =
+                            materializePrimitiveNumeric(
+                                    file,
+                                    rows,
+                                    selection.featureIndices
+                            );
                 }
+            } else {
+                series =
+                        materializeNonnumeric(
+                                rows,
+                                selection.featureIndices
+                        );
+            }
 
-                return materializePrimitiveNumeric(
-                        file,
-                        rows,
-                        selection.featureIndices
+            if (standardizationStats != null) {
+                Standardizer.transformInstanceInPlace(
+                        series,
+                        standardizationStats
                 );
             }
 
-            return materializeNonnumeric(
-                    rows,
-                    selection.featureIndices
-            );
+            return series;
         }
     }
 
@@ -940,6 +1000,30 @@ public class PerFileDelimitedSeriesReader
         }
 
         return trimmed;
+    }
+
+    private void validateStandardizationConfiguration() {
+        if (standardizationStats == null) {
+            return;
+        }
+
+        if (!isNumeric) {
+            throw new IllegalArgumentException(
+                    "Standardization statistics cannot be applied by "
+                            + "PerFileDelimitedSeriesReader when isNumeric=false."
+            );
+        }
+
+        /*
+         * Empty feature columns are valid for delimited readers. In that case,
+         * dimensions are aligned positionally and the final dimension count is
+         * validated when the realized series is transformed.
+         */
+        if (!featureColumns.isEmpty()) {
+            standardizationStats.validateFeatureCompatibility(
+                    featureColumns
+            );
+        }
     }
 
     private static final class ColumnSelection {

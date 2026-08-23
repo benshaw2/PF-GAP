@@ -14,6 +14,8 @@ import datasets.readers.lazy.LazySeriesRef;
 import distance.MEASURE;
 import imputation.initial.Imputer;
 import imputation.initial.MeanImpute;
+import preprocessing.standardization.StandardizationConfig;
+import preprocessing.standardization.StandardizationStats;
 import proximities.ProximityType;
 
 /**
@@ -172,6 +174,9 @@ public class AppContext {
 	public static String file_pattern = null;
 	public static String trainingFilePattern = null;
 	public static String testingFilePattern = null;
+
+	public static StandardizationConfig standardizationConfig = StandardizationConfig.disabled();
+	public static StandardizationStats standardizationStats = null;
 
 	//static {
 	//	rand = new Random();
@@ -456,5 +461,18 @@ public class AppContext {
 		}
 
 		return result;
+	}
+
+	public static boolean isStandardizationEnabled() {
+		return standardizationConfig != null
+				&& standardizationConfig.isEnabled();
+	}
+
+	public static void clearStandardization() {
+		standardizationConfig =
+				StandardizationConfig.disabled();
+
+		standardizationStats =
+				null;
 	}
 }

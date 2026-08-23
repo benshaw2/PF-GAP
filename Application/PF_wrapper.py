@@ -161,6 +161,14 @@ def train(
     hdf5_dataset_path="/X",
     hdf5_label_dataset_path="/y",
     file_pattern=None,
+    
+    # Standardization controls
+    standardization="none",
+    standardization_scope="per_dimension",
+    standardization_variance="population",
+    standardization_stats=None,
+    save_standardization_stats=False,
+    standardization_stats_output=None,
 
     # Other outputs/model controls
     return_training_outlier_scores=False,
@@ -284,6 +292,11 @@ def train(
         "-DTWImpute=" + _bool(DTWImpute),
         "-imputation_initialization=" + imputation_initialization,
         "-gap_update=" + gap_update,
+        
+        "-standardization=" + str(standardization),
+        "-standardization_scope=" + str(standardization_scope),
+        "-standardization_variance=" + str(standardization_variance),
+        "-save_standardization_stats=" + _bool(save_standardization_stats),
 
         "-MissingStrings=" + _list_arg(missing_indicators),
         "-entry_separator=" + entry_separator,
@@ -307,6 +320,9 @@ def train(
         
     _append_if_not_none(msgList, "hdf5_dataset_path", hdf5_dataset_path)
     _append_if_not_none(msgList, "hdf5_label_dataset_path", hdf5_label_dataset_path)
+    
+    _append_if_not_none(msgList, "standardization_stats", standardization_stats)
+    _append_if_not_none(msgList, "standardization_stats_output", standardization_stats_output)
 
     if knn_distances is not None:
         _append_common_distance_arg(msgList, "knn_distances", knn_distances)
@@ -350,6 +366,14 @@ def predict(
     label_columns=None,
     hdf5_dataset_path="/X",
     hdf5_label_dataset_path="/y",
+    
+    # Standardization controls - probably set during training
+    standardization="none",
+    standardization_scope="per_dimension",
+    standardization_variance="population",
+    standardization_stats=None,
+    save_standardization_stats=False,
+    standardization_stats_output=None,
 
     # Missing/imputation controls
     has_missing_values=None,

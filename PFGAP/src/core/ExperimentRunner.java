@@ -8,6 +8,7 @@ import imputation.ProximityImputation;
 import org.apache.commons.lang3.ArrayUtils;
 import outlier.IsolationDepthScorer;
 import outlier.OutlierScorer;
+import preprocessing.standardization.*;
 import trees.ProximityForest;
 import util.GeneralUtilities;
 import util.PrintUtilities;
@@ -16,6 +17,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -43,13 +46,29 @@ public class ExperimentRunner {
 
 	private void runTrainingMode() throws Exception {
 
+		prepareSuppliedStandardization();
+
 		ListObjectDataset trainDataOriginal = readTrainingData();
+
+		prepareTrainingStatisticsBeforeTestRead(trainDataOriginal);
+
 		ListObjectDataset testDataOriginal = AppContext.testing_file != null
 				? readTestData()
 				: null;
 
 		// currently we don't support imputation on lazy datasets.
 		validateDatasetCapabilities(trainDataOriginal, testDataOriginal);
+
+		/*
+		* Fit statistics only from training data, then apply the same fitted
+		* transformation to both training and validation/test data.
+		*/
+		/*applyTrainingStandardization(
+				trainDataOriginal,
+				testDataOriginal
+		);*/
+
+		applyPreparedStandardization(trainDataOriginal, testDataOriginal);
 
 		train_data = prepareTrainingData(trainDataOriginal);
 
@@ -133,6 +152,9 @@ public class ExperimentRunner {
 		ListObjectDataset testDataOriginal = readTestData();
 		// no imputation on lazy datasets, currently
 		validateDatasetCapabilities(trainData, testDataOriginal);
+
+		applyEvaluationStandardization(testDataOriginal);
+
 		test_data = prepareTestingData(
 				testDataOriginal,
 				trainData._get_initial_class_labels()
@@ -220,7 +242,8 @@ public class ExperimentRunner {
 				.setLabelColumns(AppContext.label_columns)
 				.setHdf5DatasetPath(AppContext.hdf5_dataset_path)
 				.setHdf5LabelDatasetPath(AppContext.hdf5_label_dataset_path)
-				.setFilePattern(filePattern);
+				.setFilePattern(filePattern)
+				.setStandardizationStats(AppContext.standardizationStats);
 	}
 
 
@@ -600,6 +623,21 @@ public class ExperimentRunner {
 			);
 		}
 
+		StandardizationConfig standardizationConfig =
+				AppContext.standardizationConfig;
+
+		if (lazyTraining
+				&& standardizationConfig != null
+				&& standardizationConfig.isEnabled()
+				&& AppContext.standardizationStats == null) {
+
+			throw new UnsupportedOperationException(
+					"Lazy training with standardization requires precomputed "
+							+ "statistics supplied through -standardization_stats. "
+							+ "Automatic lazy statistics fitting is not implemented."
+			);
+		}
+
 		if (lazyTraining != lazyTesting && trainData != null && testData != null) {
 			System.out.println(
 					"Warning: training and testing datasets use different storage modes. "
@@ -653,4 +691,427 @@ public class ExperimentRunner {
 
 		return foundLazy;
 	}*/
+
+	private void applyTrainingStandardization(
+			ListObjectDataset trainingData,
+			ListObjectDataset testingData
+	) throws IOException {
+
+		StandardizationConfig config =
+				AppContext.standardizationConfig;
+
+		if (config == null || config.isDisabled()) {
+			AppContext.standardizationStats =
+					null;
+
+			return;
+		}
+
+		config.requireImplemented();
+
+		boolean lazyTraining =
+				isLazyDataset(trainingData);
+
+		boolean lazyTesting =
+				isLazyDataset(testingData);
+
+		List<String> featureNames =
+				getStandardizationFeatureNames();
+
+		StandardizationStats stats =
+				AppContext.standardizationStats;
+
+		if (config.shouldLoadStatistics()) {
+			/*
+			 * prepareSuppliedStandardization() already loaded and validated the
+			 * statistics before the lazy or eager readers were constructed.
+			 */
+			if (stats == null) {
+				throw new IllegalStateException(
+						"Supplied standardization statistics were not loaded "
+								+ "before the dataset readers were created."
+				);
+			}
+		} else {
+			if (lazyTraining) {
+				throw new UnsupportedOperationException(
+						"Lazy training with standardization currently requires "
+								+ "precomputed statistics supplied through "
+								+ "-standardization_stats. Automatic streaming fit "
+								+ "for lazy training is reserved for Phase 4."
+				);
+			}
+
+			stats =
+					StandardizationFitter.fit(
+							trainingData,
+							config.getMethod(),
+							config.getScope(),
+							config.getVarianceConvention(),
+							featureNames
+					);
+
+			config.validateStatistics(stats);
+
+			AppContext.standardizationStats =
+					stats;
+
+			if (AppContext.verbosity > 0) {
+				System.out.println(
+						"Fitted standardization statistics from "
+								+ "the eager training dataset."
+				);
+			}
+		}
+
+		/*
+		 * Eager datasets must be transformed here.
+		 *
+		 * Lazy datasets are transformed by their PerFile*SeriesReader each time
+		 * a reference is materialized.
+		 */
+		if (!lazyTraining) {
+			Standardizer.transformInPlace(
+					trainingData,
+					stats,
+					featureNames
+			);
+		}
+
+		if (testingData != null && !lazyTesting) {
+			Standardizer.transformInPlace(
+					testingData,
+					stats,
+					featureNames
+			);
+		}
+
+		if (config.shouldSaveFittedStatistics()) {
+			Path outputPath =
+					resolveStandardizationOutputPath(config);
+
+			StandardizationJson.write(
+					outputPath,
+					stats
+			);
+
+			if (AppContext.verbosity > 0) {
+				System.out.println(
+						"Saved standardization statistics to: "
+								+ outputPath
+				);
+			}
+		}
+
+		if (AppContext.verbosity > 0
+				&& !config.shouldLoadStatistics()) {
+
+			printStandardizationSummary(stats);
+		}
+	}
+
+	private Path resolveStandardizationOutputPath(
+			StandardizationConfig config
+	) {
+		String configuredPath =
+				config.getStatisticsOutputPath();
+
+		if (configuredPath != null
+				&& !configuredPath.isBlank()) {
+
+			return Paths.get(
+					configuredPath
+			);
+		}
+
+		return Paths.get(
+				AppContext.output_dir,
+				"standardization_stats.json"
+		);
+	}
+
+	private List<String> getStandardizationFeatureNames() {
+		if (AppContext.feature_columns == null
+				|| AppContext.feature_columns.isEmpty()) {
+
+			return List.of();
+		}
+
+		return new java.util.ArrayList<>(
+				AppContext.feature_columns
+		);
+	}
+
+	private void printStandardizationSummary(
+			StandardizationStats stats
+	) {
+		System.out.println(
+				"Applied "
+						+ stats.getMethod()
+						+ " standardization with scope "
+						+ stats.getScope()
+						+ " using "
+						+ stats.getStatisticGroupCount()
+						+ " fitted statistic group(s)."
+		);
+
+		if (AppContext.verbosity > 1) {
+			System.out.println(
+					"Standardization centers: "
+							+ java.util.Arrays.toString(
+							stats.getCenters()
+					)
+			);
+
+			System.out.println(
+					"Standardization scales: "
+							+ java.util.Arrays.toString(
+							stats.getScales()
+					)
+			);
+
+			System.out.println(
+					"Standardization counts: "
+							+ java.util.Arrays.toString(
+							stats.getCounts()
+					)
+			);
+		}
+	}
+
+	private void applyEvaluationStandardization(
+			ListObjectDataset testingData
+	) {
+		StandardizationConfig config =
+				AppContext.standardizationConfig;
+
+		if (config == null || config.isDisabled()) {
+			return;
+		}
+
+		config.requireImplemented();
+
+		StandardizationStats stats =
+				AppContext.standardizationStats;
+
+		if (stats == null) {
+			throw new IllegalStateException(
+					"The loaded model enables standardization but does not "
+							+ "contain fitted or supplied statistics."
+			);
+		}
+
+		config.validateStatistics(stats);
+
+		if (isLazyDataset(testingData)) {
+			/*
+			 * readTestData() constructed the lazy test reader using the statistics
+			 * restored by ModelIO.applySnapshot(). Each series will be transformed
+			 * immediately after materialization.
+			 */
+			if (AppContext.verbosity > 0) {
+				System.out.println(
+						"Lazy testing data will use saved "
+								+ stats.getMethod()
+								+ " standardization during materialization."
+				);
+			}
+
+			return;
+		}
+
+		List<String> featureNames =
+				getStandardizationFeatureNames();
+
+		Standardizer.transformInPlace(
+				testingData,
+				stats,
+				featureNames
+		);
+
+		if (AppContext.verbosity > 0) {
+			System.out.println(
+					"Applied saved "
+							+ stats.getMethod()
+							+ " standardization to the eager testing dataset."
+			);
+		}
+	}
+
+	private void prepareSuppliedStandardization()
+			throws IOException {
+
+		StandardizationConfig config =
+				AppContext.standardizationConfig;
+
+		if (config == null || config.isDisabled()) {
+			AppContext.standardizationStats =
+					null;
+
+			return;
+		}
+
+		config.requireImplemented();
+
+		if (!config.shouldLoadStatistics()) {
+			/*
+			 * Eager training will fit statistics after the dataset is read.
+			 * Lazy training without supplied statistics is rejected later.
+			 */
+			AppContext.standardizationStats =
+					null;
+
+			return;
+		}
+
+		List<String> featureNames =
+				getStandardizationFeatureNames();
+
+		StandardizationStats stats =
+				StandardizationJson.read(
+						config.getStatisticsPath(),
+						config,
+						featureNames
+				);
+
+		config.validateStatistics(stats);
+
+		AppContext.standardizationStats =
+				stats;
+
+		if (AppContext.verbosity > 0) {
+			System.out.println(
+					"Loaded standardization statistics from: "
+							+ config.getStatisticsPath()
+			);
+
+			printStandardizationSummary(stats);
+		}
+	}
+
+	private void prepareTrainingStatisticsBeforeTestRead(
+			ListObjectDataset trainingData
+	) throws IOException {
+
+		StandardizationConfig config =
+				AppContext.standardizationConfig;
+
+		if (config == null || config.isDisabled()) {
+			AppContext.standardizationStats =
+					null;
+
+			return;
+		}
+
+		config.requireImplemented();
+
+		if (config.shouldLoadStatistics()) {
+			/*
+			 * Already loaded by prepareSuppliedStandardization().
+			 */
+			if (AppContext.standardizationStats == null) {
+				throw new IllegalStateException(
+						"Configured standardization statistics were not loaded."
+				);
+			}
+
+			return;
+		}
+
+		if (isLazyDataset(trainingData)) {
+			throw new UnsupportedOperationException(
+					"Lazy training with standardization currently requires "
+							+ "precomputed statistics supplied through "
+							+ "-standardization_stats."
+			);
+		}
+
+		List<String> featureNames =
+				getStandardizationFeatureNames();
+
+		StandardizationStats stats =
+				StandardizationFitter.fit(
+						trainingData,
+						config.getMethod(),
+						config.getScope(),
+						config.getVarianceConvention(),
+						featureNames
+				);
+
+		config.validateStatistics(stats);
+
+		AppContext.standardizationStats =
+				stats;
+
+		if (config.shouldSaveFittedStatistics()) {
+			Path outputPath =
+					resolveStandardizationOutputPath(config);
+
+			StandardizationJson.write(
+					outputPath,
+					stats
+			);
+
+			if (AppContext.verbosity > 0) {
+				System.out.println(
+						"Saved fitted standardization statistics to: "
+								+ outputPath
+				);
+			}
+		}
+
+		if (AppContext.verbosity > 0) {
+			System.out.println(
+					"Fitted standardization statistics from "
+							+ "the eager training dataset."
+			);
+
+			printStandardizationSummary(stats);
+		}
+	}
+
+	private void applyPreparedStandardization(
+			ListObjectDataset trainingData,
+			ListObjectDataset testingData
+	) {
+		StandardizationConfig config =
+				AppContext.standardizationConfig;
+
+		if (config == null || config.isDisabled()) {
+			return;
+		}
+
+		StandardizationStats stats =
+				AppContext.standardizationStats;
+
+		if (stats == null) {
+			throw new IllegalStateException(
+					"Standardization is enabled but no prepared statistics "
+							+ "are available."
+			);
+		}
+
+		config.validateStatistics(stats);
+
+		List<String> featureNames =
+				getStandardizationFeatureNames();
+
+		if (!isLazyDataset(trainingData)) {
+			Standardizer.transformInPlace(
+					trainingData,
+					stats,
+					featureNames
+			);
+		}
+
+		if (testingData != null
+				&& !isLazyDataset(testingData)) {
+
+			Standardizer.transformInPlace(
+					testingData,
+					stats,
+					featureNames
+			);
+		}
+	}
 }

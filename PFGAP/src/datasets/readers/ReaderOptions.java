@@ -1,5 +1,7 @@
 package datasets.readers;
 
+import preprocessing.standardization.StandardizationStats;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -109,6 +111,7 @@ public class ReaderOptions {
      */
     private String hdf5DatasetPath;
     private String hdf5LabelDatasetPath;
+    private StandardizationStats standardizationStats;
 
     public ReaderOptions() {
     }
@@ -316,6 +319,19 @@ public class ReaderOptions {
 
     public ReaderOptions setHdf5LabelDatasetPath(String hdf5LabelDatasetPath) {
         this.hdf5LabelDatasetPath = hdf5LabelDatasetPath;
+        return this;
+    }
+
+    public StandardizationStats getStandardizationStats() {
+        return standardizationStats;
+    }
+
+    public ReaderOptions setStandardizationStats(
+            StandardizationStats standardizationStats
+    ) {
+        this.standardizationStats =
+                standardizationStats;
+
         return this;
     }
 

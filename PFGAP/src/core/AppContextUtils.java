@@ -82,6 +82,10 @@ public class AppContextUtils {
             snapshot.initialClassLabels = ((ListObjectDataset) trainData)._get_initial_class_labels();
         }
 
+        snapshot.standardizationConfig = AppContext.standardizationConfig;
+
+        snapshot.standardizationStats = AppContext.standardizationStats;
+
         return snapshot;
     }
 }
