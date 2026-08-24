@@ -5,9 +5,10 @@ import datasets.ListObjectDataset;
 import datasets.readers.*;
 import imputation.util.MissingIndicesBuilder;
 import imputation.ProximityImputation;
-import org.apache.commons.lang3.ArrayUtils;
+// import org.apache.commons.lang3.ArrayUtils;
 import outlier.IsolationDepthScorer;
 import outlier.OutlierScorer;
+import output.*;
 import preprocessing.standardization.*;
 import trees.ProximityForest;
 import util.GeneralUtilities;
@@ -15,19 +16,47 @@ import util.PrintUtilities;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.nio.charset.StandardCharsets;
+// import java.io.PrintWriter;
+// import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
-import java.util.stream.Collectors;
+// import java.util.stream.Collectors;
 
 import static proximities.PFGAP.computeTestTrainProximities;
 import static proximities.PFGAP.computeTrainProximities;
 
 public class ExperimentRunner {
+
+	private static final String TRAINING_OUTLIER_SCORES =
+			"training_outlier_scores.csv";
+
+	private static final String VALIDATION_OUTLIER_SCORES =
+			"validation_outlier_scores.csv";
+
+	private static final String TEST_OUTLIER_SCORES =
+			"test_outlier_scores.csv";
+
+	private static final String VALIDATION_PREDICTIONS =
+			"validation_predictions.csv";
+
+	private static final String TEST_PREDICTIONS =
+			"test_predictions.csv";
+
+	private static final String TRAINING_PROXIMITIES_SPARSE =
+			"training_proximities.mtx";
+
+	private static final String TRAINING_PROXIMITIES_DENSE =
+			"training_proximities.csv";
+
+	private static final String TEST_TRAIN_PROXIMITIES_SPARSE =
+			"test_train_proximities.mtx";
+
+	private static final String TEST_TRAIN_PROXIMITIES_DENSE =
+			"test_train_proximities.csv";
 
 	ListObjectDataset train_data;
 	ListObjectDataset test_data;
@@ -98,9 +127,13 @@ public class ExperimentRunner {
 			train_data.shuffle();
 		}
 
+		ExperimentResultWriter experimentResults = new ExperimentResultWriter();
+
 		for (int repetition = 0; repetition < AppContext.num_repeats; repetition++) {
 
 			printRepetitionHeader(repetition, datasetName);
+
+			Map<String, String> artifacts = new LinkedHashMap<>();
 
 			if (AppContext.perform_train_imputation) {
 				ProximityImputation.imputeTraining(
@@ -118,57 +151,131 @@ public class ExperimentRunner {
 			forest.train(train_data);
 
 			if (AppContext.savemodel) {
-				saveModel(forest);
+				//saveModel(forest);
+				Path modelPath = saveModel(forest, repetition);
+				artifacts.put("model", relativeArtifactPath(modelPath));
 			}
 
 			if (AppContext.impute_train) {
 				writeTrainingData();
 			}
 
+			ProximityForestResult result = null;
+
 			if (test_data != null) {
-				runValidationTesting(forest, repetition, datasetName);
+				//runValidationTesting(forest, repetition, datasetName);
+				result = runValidationTesting(forest, repetition, datasetName, artifacts);
 			}
 
-			handleTrainingOutlierScores(forest);
-			handleRequestedTrainingProximities(forest);
+			//handleTrainingOutlierScores(forest);
+			Path trainingOutlierPath = handleTrainingOutlierScores(forest, repetition);
+
+			if (trainingOutlierPath != null) {
+				artifacts.put("trainingOutlierScores", relativeArtifactPath(trainingOutlierPath));
+			}
+
+			//handleRequestedTrainingProximities(forest);
+
+			Map<String, Path> proximityArtifacts = handleRequestedTrainingProximities(forest, repetition);
+
+			addArtifacts(artifacts, proximityArtifacts);
+
+			if (result == null) {
+				result = new ProximityForestResult(forest);
+			}
+
+			result.collateResults();
+
+			experimentResults.add(
+					buildExperimentResultRecord(
+							result,
+							datasetName,
+							repetition,
+							artifacts
+					)
+			);
 
 			if (AppContext.garbage_collect_after_each_repetition) {
 				System.gc();
 			}
 		}
+
+		writeExperimentResults(experimentResults);
 	}
 
 	private void runEvaluationMode() throws Exception {
 
-		ModelIO.LoadedModel loaded = ModelIO.loadModel(AppContext.modelname + ".ser");
-		ModelIO.applySnapshot(loaded.snapshot);
+		ModelIO.LoadedModel loaded =
+				ModelIO.loadModel(
+						AppContext.modelname + ".ser"
+				);
 
-		ProximityForest forest = loaded.forest;
-		ListObjectDataset trainData = loaded.trainData;
-
-		this.train_data = trainData;
-		AppContext.setTraining_data(trainData);
-
-		ListObjectDataset testDataOriginal = readTestData();
-		// no imputation on lazy datasets, currently
-		validateDatasetCapabilities(trainData, testDataOriginal);
-
-		applyEvaluationStandardization(testDataOriginal);
-
-		test_data = prepareTestingData(
-				testDataOriginal,
-				trainData._get_initial_class_labels()
+		ModelIO.applySnapshot(
+				loaded.snapshot
 		);
 
-		AppContext.setTesting_data(test_data);
+		ProximityForest forest =
+				loaded.forest;
 
-		testDataOriginal = null;
+		ListObjectDataset trainData =
+				loaded.trainData;
+
+		this.train_data =
+				trainData;
+
+		AppContext.setTraining_data(
+				trainData
+		);
+
+		ListObjectDataset testDataOriginal =
+				readTestData();
+
+		validateDatasetCapabilities(
+				trainData,
+				testDataOriginal
+		);
+
+		applyEvaluationStandardization(
+				testDataOriginal
+		);
+
+		test_data =
+				prepareTestingData(
+						testDataOriginal,
+						trainData._get_initial_class_labels()
+				);
+
+		AppContext.setTesting_data(
+				test_data
+		);
+
+		testDataOriginal =
+				null;
+
 		System.gc();
 
-		String datasetName = inferDatasetName(AppContext.training_file);
-		AppContext.setDatasetName(datasetName);
+		String datasetName =
+				inferDatasetName(
+						AppContext.training_file
+				);
 
-		for (int repetition = 0; repetition < AppContext.num_repeats; repetition++) {
+		AppContext.setDatasetName(
+				datasetName
+		);
+
+		ExperimentResultWriter experimentResults =
+				new ExperimentResultWriter();
+
+		/*
+		 * A loaded model represents one trained forest. Repeating evaluation may
+		 * still be requested, but the same forest is reused each time.
+		 */
+		for (int repetition = 0;
+			 repetition < AppContext.num_repeats;
+			 repetition++) {
+
+			Map<String, String> artifacts =
+					new LinkedHashMap<>();
 
 			if (AppContext.perform_test_imputation) {
 				ProximityImputation.imputeTesting(
@@ -176,46 +283,107 @@ public class ExperimentRunner {
 						trainData,
 						forest,
 						(forestForProx, test, train) ->
-								computeTestTrainProximities(forestForProx, test, train)
+								computeTestTrainProximities(
+										forestForProx,
+										test,
+										train
+								)
 				);
 			}
+
+			ProximityForestResult result =
+					new ProximityForestResult(
+							forest
+					);
 
 			if (AppContext.isIsolationMode()) {
-				handleIsolationScores(forest, test_data, trainData.size(), "IsolationScores_saved.txt");
-				continue;
-			}
+				Path scorePath =
+						handleIsolationScores(
+								forest,
+								test_data,
+								trainData.size(),
+								TEST_OUTLIER_SCORES,
+								repetition
+						);
 
-			ProximityForestResult result = forest.test(test_data);
-
-			if (!AppContext.perform_test_imputation) {
-				result.printResults(datasetName, repetition, "");
-			}
-
-			if (AppContext.impute_test) {
-				writeTestingData();
-			}
-
-			//if (AppContext.isIsolationMode()) {
-			//	handleIsolationScores(forest, test_data, trainData.size(), "IsolationScores_saved.txt");
-			//	continue;
-			//}
-
-			if (AppContext.getprox) {
-				computeAndWriteTestTrainProximities(forest, trainData);
-			}
-
-			if (AppContext.get_predictions && !AppContext.isIsolationMode()) {
-				writePredictions(
-						result,
-						test_data,
-						"Predictions_saved.txt"
+				artifacts.put(
+						"testOutlierScores",
+						relativeArtifactPath(
+								scorePath
+						)
 				);
+
+			} else {
+				result =
+						forest.test(
+								test_data
+						);
+
+				if (!AppContext.perform_test_imputation) {
+					result.printResults(
+							datasetName,
+							repetition,
+							""
+					);
+				}
+
+				if (AppContext.impute_test) {
+					writeTestingData();
+				}
+
+				if (AppContext.get_predictions) {
+					Path predictionPath =
+							writePredictions(
+									result,
+									test_data,
+									TEST_PREDICTIONS,
+									repetition
+							);
+
+					artifacts.put(
+							"testPredictions",
+							relativeArtifactPath(
+									predictionPath
+							)
+					);
+				}
+
+				if (AppContext.getprox) {
+					Path proximityPath =
+							computeAndWriteTestTrainProximities(
+									forest,
+									trainData,
+									repetition
+							);
+
+					artifacts.put(
+							"testTrainProximities",
+							relativeArtifactPath(
+									proximityPath
+							)
+					);
+				}
 			}
+
+			result.collateResults();
+
+			experimentResults.add(
+					buildExperimentResultRecord(
+							result,
+							datasetName,
+							repetition,
+							artifacts
+					)
+			);
 
 			if (AppContext.garbage_collect_after_each_repetition) {
 				System.gc();
 			}
 		}
+
+		writeExperimentResults(
+				experimentResults
+		);
 	}
 
 	private ReaderOptions buildBaseReaderOptions(ReaderType readerType, String filePattern) { //(String dataPath) {
@@ -322,10 +490,12 @@ public class ExperimentRunner {
 		return prepared;
 	}
 
-	private void runValidationTesting(
+	private ProximityForestResult runValidationTesting(
 			ProximityForest forest,
 			int repetition,
-			String datasetName) throws Exception {
+			String datasetName,
+			Map<String, String> artifacts
+	) throws Exception {
 
 		if (AppContext.perform_test_imputation) {
 			ProximityImputation.imputeTesting(
@@ -333,45 +503,108 @@ public class ExperimentRunner {
 					train_data,
 					forest,
 					(forestForProx, test, train) ->
-							computeTestTrainProximities(forestForProx, test, train)
+							computeTestTrainProximities(
+									forestForProx,
+									test,
+									train
+							)
 			);
 		}
 
 		if (AppContext.isIsolationMode()) {
-			handleIsolationScores(forest, test_data, train_data.size(), "IsolationScores.txt");
-			return;
+			Path scorePath =
+					handleIsolationScores(
+							forest,
+							test_data,
+							train_data.size(),
+							VALIDATION_OUTLIER_SCORES,
+							repetition
+					);
+
+			artifacts.put(
+					"validationOutlierScores",
+					relativeArtifactPath(
+							scorePath
+					)
+			);
+
+			ProximityForestResult isolationResult =
+					new ProximityForestResult(
+							forest
+					);
+
+			isolationResult.collateResults();
+
+			return isolationResult;
 		}
 
 		if (AppContext.impute_test) {
 			writeTestingData();
 		}
 
-		ProximityForestResult result = forest.test(test_data);
+		ProximityForestResult result =
+				forest.test(
+						test_data
+				);
 
-		if (AppContext.get_predictions && !AppContext.isIsolationMode()) {
-			writePredictions(
-					result,
-					test_data,
-					"Validation_Predictions.txt"
+		if (AppContext.get_predictions) {
+			Path predictionPath =
+					writePredictions(
+							result,
+							test_data,
+							VALIDATION_PREDICTIONS,
+							repetition
+					);
+
+			artifacts.put(
+					"validationPredictions",
+					relativeArtifactPath(
+							predictionPath
+					)
 			);
 		}
 
-		result.printResults(datasetName, repetition, "");
+		result.printResults(
+				datasetName,
+				repetition,
+				""
+		);
+
+		return result;
 	}
 
-	private void saveModel(ProximityForest forest) {
-
+	private Path saveModel(
+			ProximityForest forest,
+			int repetition
+	) {
 		try {
-			AppContextSnapshot snapshot = AppContextUtils.captureSnapshot();
+			AppContextSnapshot snapshot =
+					AppContextUtils.captureSnapshot();
+
+			Path modelPath =
+					outputPath(
+							repeatedFileName(
+									AppContext.modelname + ".ser",
+									repetition
+							)
+					);
 
 			ModelIO.saveModel(
-					AppContext.output_dir + "/" + AppContext.modelname + ".ser",
+					modelPath.toString(),
 					forest,
 					train_data,
 					snapshot
 			);
+
+			return modelPath;
+
 		} catch (IOException e) {
 			PrintUtilities.abort(e);
+
+			throw new IllegalStateException(
+					"Model saving failed.",
+					e
+			);
 		}
 	}
 
@@ -395,180 +628,589 @@ public class ExperimentRunner {
 		);
 	}
 
-	private void writePredictions(
+	private Path writePredictions(
 			ProximityForestResult result,
 			ListObjectDataset data,
-			String fileName) throws IOException {
+			String baseFileName,
+			int repetition
+	) throws IOException {
 
 		if (AppContext.isIsolationMode()) {
-			return;
+			throw new IllegalStateException(
+					"Prediction output is unavailable in isolation mode."
+			);
 		}
 
-		PrintWriter writer = new PrintWriter(
-				AppContext.output_dir + fileName,
-				StandardCharsets.UTF_8
+		Path outputPath =
+				outputPath(
+						repeatedFileName(
+								baseFileName,
+								repetition
+						)
+				);
+
+		if (AppContext.isRegressionMode()) {
+			return PredictionWriter.writeRegression(
+					outputPath,
+					result.Predictions
+			);
+		}
+
+		List<Object> predictedLabels =
+				result.Predictions;
+
+		Map<Integer, Object> newToOriginal =
+				data.invertLabelMap(
+						data._get_initial_class_labels()
+				);
+
+		List<Object> originalPredictions =
+				predictedLabels.stream()
+						.map(newToOriginal::get)
+						.toList();
+
+		return PredictionWriter.writeClassification(
+				outputPath,
+				originalPredictions
 		);
-
-		if (!AppContext.isRegressionMode()) {
-			List<Object> predictedLabels = result.Predictions;
-			Map<Integer, Object> newToOriginal =
-					data.invertLabelMap(data._get_initial_class_labels());
-
-			List<Object> originalPredictions = predictedLabels.stream()
-					.map(newToOriginal::get)
-					.collect(Collectors.toList());
-
-			writer.print(ArrayUtils.toString(originalPredictions));
-		} else {
-			writer.print(ArrayUtils.toString(result.Predictions));
-		}
-
-		writer.close();
 	}
 
-	private void handleTrainingOutlierScores(
-			ProximityForest forest) throws Exception {
+	private Path handleTrainingOutlierScores(
+			ProximityForest forest,
+			int repetition
+	) throws Exception {
 
 		if (!AppContext.get_training_outlier_scores) {
-			return;
+			return null;
 		}
 
 		if (AppContext.isIsolationMode()) {
-			handleIsolationScores(
+			return handleIsolationScores(
 					forest,
 					train_data,
 					train_data.size(),
-					"outlier_scores.txt"
+					TRAINING_OUTLIER_SCORES,
+					repetition
 			);
-			return;
 		}
 
 		if (AppContext.isRegressionMode()) {
-			return;
+			return null;
 		}
 
-		boolean originalSparseSetting = AppContext.useSparseProximities;
+		boolean originalSparseSetting =
+				AppContext.useSparseProximities;
 
-		if (AppContext.getprox) {
-			AppContext.useSparseProximities = false;
-		} else {
-			AppContext.useSparseProximities = true;
-		}
+		try {
+			System.out.println(
+					"Computing Training Proximities..."
+			);
 
-		System.out.println("Computing Training Proximities...");
-		computeTrainProximities(forest, train_data);
-
-		System.out.println("Computing Training Outlier Scores...");
-		double[] scores = OutlierScorer.getOutlierScores(
-				AppContext.useSparseProximities,
-				false,
-				true,
-				train_data._internal_class_array(),
-				AppContext.training_proximities,
-				AppContext.training_proximities_sparse
-		);
-
-		PrintWriter writer = new PrintWriter(
-				AppContext.output_dir + "outlier_scores.txt",
-				StandardCharsets.UTF_8
-		);
-
-		writer.print(ArrayUtils.toString(scores));
-		writer.close();
-
-		AppContext.useSparseProximities = originalSparseSetting;
-	}
-
-	private void handleRequestedTrainingProximities(
-			ProximityForest forest) throws IOException, ExecutionException, InterruptedException {
-
-		if (!AppContext.getprox) {
-			return;
-		}
-
-		if (!AppContext.get_training_outlier_scores) {
-			boolean originalSparseSetting = AppContext.useSparseProximities;
-			AppContext.useSparseProximities = false;
-
-			System.out.println("Computing Training Proximities...");
-			double start = System.currentTimeMillis();
-
-			computeTrainProximities(forest, train_data);
-
-			double end = System.currentTimeMillis();
-
-			System.out.print("Done Computing Training Proximities. ");
-			System.out.print("Computation time: ");
-			System.out.println(end - start + "ms");
-
-			AppContext.useSparseProximities = originalSparseSetting;
-		}
-
-		PrintWriter writer = new PrintWriter(
-				AppContext.output_dir + "TrainingProximities.txt",
-				StandardCharsets.UTF_8
-		);
-
-		writer.print(ArrayUtils.toString(AppContext.training_proximities));
-		writer.close();
-
-		if (test_data != null) {
-			computeAndWriteTestTrainProximities(
+			computeTrainProximities(
 					forest,
 					train_data
+			);
+
+			System.out.println(
+					"Computing Training Outlier Scores..."
+			);
+
+			double[] scores =
+					OutlierScorer.getOutlierScores(
+							AppContext.useSparseProximities,
+							false,
+							true,
+							train_data._internal_class_array(),
+							AppContext.training_proximities,
+							AppContext.training_proximities_sparse
+					);
+
+			Path outputPath =
+					outputPath(
+							repeatedFileName(
+									TRAINING_OUTLIER_SCORES,
+									repetition
+							)
+					);
+
+			return OutlierScoreWriter.write(
+					outputPath,
+					scores
+			);
+
+		} finally {
+			AppContext.useSparseProximities =
+					originalSparseSetting;
+		}
+	}
+
+	private Map<String, Path> handleRequestedTrainingProximities(
+			ProximityForest forest,
+			int repetition
+	) throws IOException, ExecutionException, InterruptedException {
+
+		Map<String, Path> artifacts =
+				new LinkedHashMap<>();
+
+		if (!AppContext.getprox) {
+			return artifacts;
+		}
+
+		/*
+		 * If outlier scoring was not requested, no earlier operation is
+		 * guaranteed to have populated the requested proximity representation.
+		 */
+		if (!AppContext.get_training_outlier_scores) {
+			System.out.println(
+					"Computing Training Proximities..."
+			);
+
+			long start =
+					System.currentTimeMillis();
+
+			computeTrainProximities(
+					forest,
+					train_data
+			);
+
+			long end =
+					System.currentTimeMillis();
+
+			System.out.println(
+					"Done Computing Training Proximities. "
+							+ "Computation time: "
+							+ (end - start)
+							+ "ms"
+			);
+		}
+
+		Path trainingPath;
+
+		if (AppContext.useSparseProximities) {
+			if (AppContext.training_proximities_sparse == null) {
+				throw new IllegalStateException(
+						"Sparse training proximities were requested, but the "
+								+ "sparse proximity map is null."
+				);
+			}
+
+			trainingPath =
+					outputPath(
+							repeatedFileName(
+									TRAINING_PROXIMITIES_SPARSE,
+									repetition
+							)
+					);
+
+			ProximityWriter.writeSparseTrainingMatrix(
+					trainingPath,
+					AppContext.training_proximities_sparse,
+					train_data.size()
+			);
+
+		} else {
+			if (AppContext.training_proximities == null) {
+				throw new IllegalStateException(
+						"Dense training proximities were requested, but the "
+								+ "dense proximity matrix is null."
+				);
+			}
+
+			trainingPath =
+					outputPath(
+							repeatedFileName(
+									TRAINING_PROXIMITIES_DENSE,
+									repetition
+							)
+					);
+
+			ProximityWriter.writeDenseCsv(
+					trainingPath,
+					AppContext.training_proximities
+			);
+		}
+
+		artifacts.put(
+				"trainingProximities",
+				trainingPath
+		);
+
+		if (test_data != null) {
+			Path testTrainPath =
+					computeAndWriteTestTrainProximities(
+							forest,
+							train_data,
+							repetition
+					);
+
+			artifacts.put(
+					"testTrainProximities",
+					testTrainPath
+			);
+		}
+
+		return artifacts;
+	}
+
+	private Path handleIsolationScores(
+			ProximityForest forest,
+			ListObjectDataset data,
+			int normalizationSampleSize,
+			String baseFileName,
+			int repetition
+	) throws Exception {
+
+		double[] scores =
+				IsolationDepthScorer.score(
+						forest,
+						data,
+						normalizationSampleSize
+				);
+
+		Path outputPath =
+				outputPath(
+						repeatedFileName(
+								baseFileName,
+								repetition
+						)
+				);
+
+		return OutlierScoreWriter.write(
+				outputPath,
+				scores
+		);
+	}
+
+	private Path computeAndWriteTestTrainProximities(
+			ProximityForest forest,
+			ListObjectDataset trainData,
+			int repetition
+	) throws IOException, ExecutionException, InterruptedException {
+
+		System.out.println(
+				"Computing Test/Train Proximities..."
+		);
+
+		long start =
+				System.currentTimeMillis();
+
+		computeTestTrainProximities(
+				forest,
+				test_data,
+				trainData
+		);
+
+		long end =
+				System.currentTimeMillis();
+
+		System.out.println(
+				"Done Computing Test/Train Proximities. "
+						+ "Computation time: "
+						+ (end - start)
+						+ "ms"
+		);
+
+		if (AppContext.useSparseProximities) {
+			if (AppContext.testing_training_proximities_sparse == null) {
+				throw new IllegalStateException(
+						"Sparse test/train proximities were requested, but "
+								+ "the sparse proximity map is null."
+				);
+			}
+
+			Path outputPath =
+					outputPath(
+							repeatedFileName(
+									TEST_TRAIN_PROXIMITIES_SPARSE,
+									repetition
+							)
+					);
+
+			return ProximityWriter.writeSparseTestTrainMatrix(
+					outputPath,
+					AppContext.testing_training_proximities_sparse,
+					test_data.size(),
+					trainData.size()
+			);
+		}
+
+		if (AppContext.testing_training_proximities == null) {
+			throw new IllegalStateException(
+					"Dense test/train proximities were requested, but "
+							+ "the dense proximity matrix is null."
+			);
+		}
+
+		Path outputPath =
+				outputPath(
+						repeatedFileName(
+								TEST_TRAIN_PROXIMITIES_DENSE,
+								repetition
+						)
+				);
+
+		return ProximityWriter.writeDenseCsv(
+				outputPath,
+				AppContext.testing_training_proximities
+		);
+	}
+
+	private ExperimentResultRecord buildExperimentResultRecord(
+			ProximityForestResult result,
+			String datasetName,
+			int repetition,
+			Map<String, String> artifacts
+	) {
+		result.collateResults();
+
+		ExperimentResultRecord.Builder builder =
+				ExperimentResultRecord.builder()
+						.setDataset(datasetName)
+						.setRepetition(repetition + 1)
+						.setForestId(result.forest_id)
+						.setForestMode(
+								AppContext.forest_mode
+						)
+						.addCount(
+								"trainingInstanceCount",
+								train_data == null
+										? 0L
+										: train_data.size()
+						)
+						.addCount(
+								"testingInstanceCount",
+								test_data == null
+										? 0L
+										: test_data.size()
+						)
+						.addTimingNanoseconds(
+								"trainingMilliseconds",
+								Math.max(
+										0L,
+										result.elapsedTimeTrain
+								)
+						)
+						.addTimingNanoseconds(
+								"testingMilliseconds",
+								Math.max(
+										0L,
+										result.elapsedTimeTest
+								)
+						)
+						.addForestStatistic(
+								"numTrees",
+								result.total_num_trees
+						)
+						.addForestStatistic(
+								"meanNodesPerTree",
+								result.mean_num_nodes_per_tree
+						)
+						.addForestStatistic(
+								"standardDeviationNodesPerTree",
+								result.sd_num_nodes_per_tree
+						)
+						.addForestStatistic(
+								"meanDepthPerTree",
+								result.mean_depth_per_tree
+						)
+						.addForestStatistic(
+								"standardDeviationDepthPerTree",
+								result.sd_depth_per_tree
+						)
+						.addForestStatistic(
+								"meanWeightedDepthPerTree",
+								result.mean_weighted_depth_per_tree
+						)
+						.addForestStatistic(
+								"standardDeviationWeightedDepthPerTree",
+								result.sd_weighted_depth_per_tree
+						)
+						.addConfiguration(
+								"proximityType",
+								AppContext.proximityType
+						)
+						.addConfiguration(
+								"trainingReaderType",
+								AppContext.getTrainingReaderType()
+						)
+						.addConfiguration(
+								"testingReaderType",
+								test_data == null
+										? null
+										: AppContext.getTestingReaderType()
+						)
+						.addConfiguration(
+								"standardizationMethod",
+								AppContext.standardizationConfig == null
+										? null
+										: AppContext.standardizationConfig.getMethod()
+						)
+						.addConfiguration(
+								"standardizationScope",
+								AppContext.standardizationConfig == null
+										? null
+										: AppContext.standardizationConfig.getScope()
+						)
+						.addArtifacts(
+								artifacts
+						);
+
+		if (AppContext.isClassificationMode()) {
+			int total =
+					result.correct + result.errors;
+
+			if (total > 0) {
+				double accuracy =
+						(double) result.correct
+								/ total;
+
+				double errorRate =
+						(double) result.errors
+								/ total;
+
+				builder.addMetric(
+						"accuracy",
+						accuracy
+				);
+
+				builder.addMetric(
+						"errorRate",
+						errorRate
+				);
+			}
+
+			builder.addCount(
+					"correct",
+					result.correct
+			);
+
+			builder.addCount(
+					"errors",
+					result.errors
+			);
+
+		} else if (AppContext.isRegressionMode()) {
+			/*
+			 * result.score is retained under a generic legacy name until the
+			 * regression result implementation explicitly identifies whether
+			 * it represents RMSE, MAE, R2, or another metric.
+			 */
+			if (Double.isFinite(result.score)) {
+				builder.addMetric(
+						"regressionScore",
+						result.score
+				);
+			}
+		}
+
+		return builder.build();
+	}
+
+	private void writeExperimentResults(
+			ExperimentResultWriter resultWriter
+	) throws IOException {
+
+		if (AppContext.export_level < 1
+				|| resultWriter.isEmpty()) {
+
+			return;
+		}
+
+		Path outputPath =
+				resultWriter.writeToDirectory(
+						Paths.get(
+								AppContext.output_dir
+						)
+				);
+
+		if (AppContext.verbosity > 0) {
+			System.out.println(
+					"Wrote experiment results to: "
+							+ outputPath
 			);
 		}
 	}
 
-	private void handleIsolationScores(
-			ProximityForest forest,
-			ListObjectDataset data,
-			int normalizationSampleSize,
+	private Path outputPath(
 			String fileName
-	) throws Exception {
-
-		double[] scores = IsolationDepthScorer.score(
-				forest,
-				data,
-				normalizationSampleSize
-		);
-
-		PrintWriter writer = new PrintWriter(
-				AppContext.output_dir + fileName,
-				StandardCharsets.UTF_8
-		);
-
-		writer.print(ArrayUtils.toString(scores));
-		writer.close();
+	) {
+		return Paths.get(
+				AppContext.output_dir,
+				fileName
+		).toAbsolutePath().normalize();
 	}
 
-	private void computeAndWriteTestTrainProximities(
-			ProximityForest forest,
-			ListObjectDataset trainData) throws IOException, ExecutionException, InterruptedException {
+	private String repeatedFileName(
+			String baseFileName,
+			int repetition
+	) {
+		if (AppContext.num_repeats <= 1) {
+			return baseFileName;
+		}
 
-		boolean originalSparseSetting = AppContext.useSparseProximities;
-		AppContext.useSparseProximities = false;
+		int separatorIndex =
+				baseFileName.lastIndexOf('.');
 
-		System.out.println("Computing Test/Train Proximities...");
-		double start = System.currentTimeMillis();
+		String suffix =
+				"_repeat_" + (repetition + 1);
 
-		computeTestTrainProximities(forest, test_data, trainData);
+		if (separatorIndex <= 0) {
+			return baseFileName + suffix;
+		}
 
-		double end = System.currentTimeMillis();
-
-		System.out.print("Done Computing Test/Train Proximities. ");
-		System.out.print("Computation time: ");
-		System.out.println(end - start + "ms");
-
-		PrintWriter writer = new PrintWriter(
-				AppContext.output_dir + "TestTrainProximities.txt",
-				StandardCharsets.UTF_8
+		return baseFileName.substring(
+				0,
+				separatorIndex
+		)
+				+ suffix
+				+ baseFileName.substring(
+				separatorIndex
 		);
+	}
 
-		writer.print(ArrayUtils.toString(AppContext.testing_training_proximities));
-		writer.close();
+	private String relativeArtifactPath(
+			Path artifactPath
+	) {
+		if (artifactPath == null) {
+			return null;
+		}
 
-		AppContext.useSparseProximities = originalSparseSetting;
+		Path outputDirectory =
+				Paths.get(
+						AppContext.output_dir
+				).toAbsolutePath().normalize();
+
+		Path normalizedArtifact =
+				artifactPath.toAbsolutePath()
+						.normalize();
+
+		try {
+			return outputDirectory.relativize(
+					normalizedArtifact
+			).toString();
+
+		} catch (IllegalArgumentException e) {
+			/*
+			 * This can occur when paths are on different filesystem roots.
+			 */
+			return normalizedArtifact.toString();
+		}
+	}
+
+	private void addArtifacts(
+			Map<String, String> destination,
+			Map<String, Path> source
+	) {
+		for (Map.Entry<String, Path> entry :
+				source.entrySet()) {
+
+			destination.put(
+					entry.getKey(),
+					relativeArtifactPath(
+							entry.getValue()
+					)
+			);
+		}
 	}
 
 	private void printRepetitionHeader(
@@ -591,13 +1233,26 @@ public class ExperimentRunner {
 		}
 	}
 
-	private String inferDatasetName(String trainingFilePath) {
+	private String inferDatasetName(
+			String trainingFilePath
+	) {
+		if (trainingFilePath == null
+				|| trainingFilePath.isBlank()) {
 
-		File trainingFile = new File(trainingFilePath);
+			return "dataset";
+		}
+
+		File trainingFile =
+				new File(
+						trainingFilePath
+				);
 
 		return trainingFile
 				.getName()
-				.replaceAll("_TRAIN.txt", "");
+				.replaceFirst(
+						"(?i)_TRAIN\\.(txt|tsv|csv)$",
+						""
+				);
 	}
 
 	private void validateDatasetCapabilities(
