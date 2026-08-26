@@ -1,5 +1,6 @@
 package datasets.readers;
 
+import ch.randelshofer.fastdoubleparser.JavaDoubleParser;
 import core.AppContext;
 import datasets.readers.lazy.LazySeriesReader;
 import datasets.readers.lazy.LazySeriesRef;
@@ -447,7 +448,8 @@ public class PerFileDelimitedSeriesReader
             try {
                 accumulator.addNumeric(
                         dimension,
-                        Double.parseDouble(token)
+                        //Double.parseDouble(token)
+                        JavaDoubleParser.parseDouble(token)
                 );
             } catch (NumberFormatException e) {
                 throw new IllegalArgumentException(

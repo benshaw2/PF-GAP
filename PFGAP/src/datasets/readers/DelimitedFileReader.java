@@ -1,5 +1,6 @@
 package datasets.readers;
 
+import ch.randelshofer.fastdoubleparser.JavaDoubleParser;
 import core.AppContext;
 import datasets.ListObjectDataset;
 import de.siegmar.fastcsv.reader.CsvReader;
@@ -788,9 +789,10 @@ public class DelimitedFileReader
         }
 
         try {
-            return Double.parseDouble(
-                    trimmed
-            );
+            //return Double.parseDouble(
+            //        trimmed
+            //);
+            return JavaDoubleParser.parseDouble(trimmed);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
                     "Could not parse numeric value '"
@@ -834,9 +836,8 @@ public class DelimitedFileReader
         }
 
         try {
-            return Double.parseDouble(
-                    trimmed
-            );
+            //return Double.parseDouble(trimmed);
+            return JavaDoubleParser.parseDouble(trimmed);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
                     "Could not parse numeric value '"
@@ -871,9 +872,8 @@ public class DelimitedFileReader
         }
 
         try {
-            return Double.valueOf(
-                    trimmed
-            );
+            //return Double.valueOf(trimmed);
+            return JavaDoubleParser.parseDouble(trimmed);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
                     "Could not parse numeric value '"
@@ -907,9 +907,8 @@ public class DelimitedFileReader
         }
 
         try {
-            return Double.valueOf(
-                    trimmed
-            );
+            //return Double.valueOf(trimmed);
+            return JavaDoubleParser.parseDouble(trimmed);
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(
                     "Could not parse numeric value '"
@@ -1590,10 +1589,8 @@ public class DelimitedFileReader
                     continue;
                 }
 
-                features[outputIndex++] =
-                        Double.parseDouble(
-                                lineArray[index].trim()
-                        );
+                //features[outputIndex++] = Double.parseDouble(lineArray[index].trim());
+                features[outputIndex++] = JavaDoubleParser.parseDouble(lineArray[index].trim());
             }
 
             return new ParsedDoubleRow(
@@ -1657,9 +1654,8 @@ public class DelimitedFileReader
                 return null;
             }
 
-            return Double.valueOf(
-                    token.trim()
-            );
+            //return Double.valueOf(token.trim());
+            return JavaDoubleParser.parseDouble(token.trim());
         }
 
         public static Object tryParseLabel(
@@ -1716,10 +1712,8 @@ public class DelimitedFileReader
                  index < tokens.length;
                  index++) {
 
-                parsed[index] =
-                        Double.parseDouble(
-                                tokens[index].trim()
-                        );
+                //parsed[index] = Double.parseDouble(tokens[index].trim());
+                parsed[index] = JavaDoubleParser.parseDouble(tokens[index].trim());
             }
 
             return parsed;

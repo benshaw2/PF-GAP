@@ -1,5 +1,6 @@
 package datasets.readers.lazy;
 
+import datasets.readers.NumericPerFileDelimitedSeriesReader;
 import datasets.readers.PerFileDelimitedSeriesReader;
 import datasets.readers.PerFileParquetSeriesReader;
 import datasets.readers.ReaderType;
@@ -40,6 +41,16 @@ public final class LazySeriesReaderFactory {
                             spec.isNumeric(),
                             spec.hasMissingValues(),
                             spec.getStandardizationStats()
+                    );
+
+            case LAZY_PER_FILE_NUMERIC_DELIMITED ->
+                    new NumericPerFileDelimitedSeriesReader(
+                            spec.getEntrySeparator(),
+                            spec.hasHeader(),
+                            spec.getTimeColumn(),
+                            spec.getFeatureColumns(),
+                            spec.getStandardizationStats(),
+                            spec.getInitialTimeCapacity()
                     );
 
             default ->
