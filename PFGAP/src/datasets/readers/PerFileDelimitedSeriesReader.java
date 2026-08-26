@@ -3,12 +3,12 @@ package datasets.readers;
 import core.AppContext;
 import datasets.readers.lazy.LazySeriesReader;
 import datasets.readers.lazy.LazySeriesRef;
+import de.siegmar.fastcsv.reader.CsvReader;
+import de.siegmar.fastcsv.reader.CsvRecord;
 import preprocessing.standardization.StandardizationStats;
 import preprocessing.standardization.Standardizer;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -16,72 +16,79 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * Materializes one time series from one delimited file.
  *
- * This class is shared by:
+ * <p>This class is shared by:</p>
  *
- *      PerFileDelimitedReader
- *      LazyPerFileDelimitedReader
+ * <ul>
+ *     <li>PerFileDelimitedReader</li>
+ *     <li>LazyPerFileDelimitedReader</li>
+ * </ul>
  *
- * The class itself is not inherently eager or lazy. It reads one file when
- * read(...) is called. The higher-level dataset reader determines whether
- * that call occurs:
+ * <p>The class itself is not inherently eager or lazy. It reads one file
+ * whenever {@link #read(LazySeriesRef)} or {@link #readFile(Path)} is called.
+ * The higher-level dataset reader determines when that materialization occurs.</p>
  *
- *      1. During initial dataset construction, for eager loading.
- *      2. During distance evaluation, for lazy loading.
+ * <p>Expected file organization:</p>
  *
- * Expected file organization:
+ * <pre>
+ * one record = one time point
+ * one selected column = one time-series dimension
+ * </pre>
  *
- *      one row = one time point
- *      one selected column = one time-series dimension
+ * <p>Returned representations:</p>
  *
+ * <pre>
+ * numeric data without missing values:
+ *     double[dimension][time]
  *
- * Returned representation:
+ * numeric data with missing values:
+ *     Double[dimension][time]
  *
- *      numeric data without missing values:
- *          double[dimension][time]
+ * nonnumeric data:
+ *     Object[dimension][time]
+ * </pre>
  *
- *      numeric data with missing values:
- *          Double[dimension][time]
+ * <p>When numeric data permits missing values, missing entries are represented
+ * as {@code null} in the returned {@code Double[][]}. During parsing, missing
+ * positions are tracked separately from numerical values so that a genuine
+ * numerical {@code NaN} is not confused with a missing value.</p>
  *
- *      nonnumeric data:
- *          Object[dimension][time]
+ * <p>Header behavior:</p>
  *
- * This dimension-major representation matches the expected organization of
- * multivariate time-series distances in PFGAP.
+ * <ul>
+ *     <li>
+ *         When {@code hasHeader=true}, {@code featureColumns} and
+ *         {@code timeColumn} are interpreted as column names.
+ *     </li>
+ *     <li>
+ *         When {@code hasHeader=false}, they are interpreted as zero-based
+ *         integer column indices.
+ *     </li>
+ *     <li>
+ *         When {@code featureColumns} is empty, every column except the
+ *         configured time column is treated as a feature column.
+ *     </li>
+ * </ul>
  *
- * Header behavior:
+ * <p>The reader is backed by FastCSV and supports quoted fields, delimiters
+ * inside quoted fields, and embedded record separators in quoted fields.
+ * Empty records are ignored.</p>
  *
- *      hasHeader = true
- *
- *          featureColumns and timeColumn are interpreted as column names.
- *
- *      hasHeader = false
- *
- *          featureColumns may contain zero-based integer column indices,
- *          such as:
- *
- *              ["0", "1", "2"]
- *
- *          If featureColumns is empty, every column except timeColumn is
- *          treated as a feature column.
- *
- *          When no header is present, timeColumn may also be a zero-based
- *          integer column index.
- *
- * Missing numeric values are represented as Double.NaN. Missing nonnumeric
- * values are retained as null.
- *
- * The delimiter is treated literally. This implementation does not currently
- * implement quoted CSV fields containing delimiters or embedded newlines.
+ * <p>This implementation currently requires a single-character field
+ * separator. This covers ordinary CSV, TSV, pipe-delimited, and
+ * semicolon-delimited files.</p>
  */
 public class PerFileDelimitedSeriesReader
         implements LazySeriesReader {
 
+    private static final int DEFAULT_INITIAL_TIME_CAPACITY =
+            256;
+
     private final String entrySeparator;
+    private final char fieldSeparator;
     private final boolean hasHeader;
     private final String timeColumn;
     private final List<String> featureColumns;
@@ -98,21 +105,21 @@ public class PerFileDelimitedSeriesReader
             boolean hasMissingValues,
             StandardizationStats standardizationStats
     ) {
-        if (entrySeparator == null || entrySeparator.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "PerFileDelimitedSeriesReader requires a non-empty "
-                            + "entry separator."
-            );
-        }
-
         this.entrySeparator =
-                normalizeSeparator(entrySeparator);
+                validateAndNormalizeSeparator(
+                        entrySeparator
+                );
+
+        this.fieldSeparator =
+                this.entrySeparator.charAt(0);
 
         this.hasHeader =
                 hasHeader;
 
         this.timeColumn =
-                normalizeNullableString(timeColumn);
+                normalizeNullableString(
+                        timeColumn
+                );
 
         this.featureColumns =
                 featureColumns == null
@@ -125,7 +132,8 @@ public class PerFileDelimitedSeriesReader
         this.hasMissingValues =
                 hasMissingValues;
 
-        this.standardizationStats = standardizationStats;
+        this.standardizationStats =
+                standardizationStats;
 
         validateStandardizationConfiguration();
     }
@@ -138,41 +146,22 @@ public class PerFileDelimitedSeriesReader
             boolean isNumeric,
             boolean hasMissingValues
     ) {
-        if (entrySeparator == null || entrySeparator.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "PerFileDelimitedSeriesReader requires a non-empty "
-                            + "entry separator."
-            );
-        }
-
-        this.entrySeparator =
-                normalizeSeparator(entrySeparator);
-
-        this.hasHeader =
-                hasHeader;
-
-        this.timeColumn =
-                normalizeNullableString(timeColumn);
-
-        this.featureColumns =
-                featureColumns == null
-                        ? new ArrayList<>()
-                        : new ArrayList<>(featureColumns);
-
-        this.isNumeric =
-                isNumeric;
-
-        this.hasMissingValues =
-                hasMissingValues;
-
-        this.standardizationStats = null;
+        this(
+                entrySeparator,
+                hasHeader,
+                timeColumn,
+                featureColumns,
+                isNumeric,
+                hasMissingValues,
+                null
+        );
     }
 
     /**
      * Reads and materializes the file identified by a lazy series reference.
      *
-     * The reader key and dataset index identify the reference within PFGAP,
-     * while the file path identifies the actual delimited file to read.
+     * @param reference lazy reference containing the file to materialize
+     * @return materialized dimension-major time series
      */
     @Override
     public Object read(
@@ -199,127 +188,115 @@ public class PerFileDelimitedSeriesReader
     }
 
     /**
-     * Reads one delimited file directly.
+     * Reads and materializes one delimited time-series file.
      *
-     * This method is useful to the future eager PerFileDelimitedReader,
-     * which can materialize files without constructing temporary
-     * LazySeriesRef objects.
+     * <p>The file is processed sequentially. Records are not retained after
+     * their selected fields have been appended to the output buffers.</p>
+     *
+     * @param file file to materialize
+     * @return materialized dimension-major time series
+     * @throws IOException when the file cannot be read
      */
     public Object readFile(
             Path file
     ) throws IOException {
         validateFile(file);
 
-        try (BufferedReader reader =
-                     Files.newBufferedReader(
-                             file,
-                             StandardCharsets.UTF_8
-                     )) {
+        try (CsvReader<CsvRecord> csvReader =
+                     CsvReader.builder()
+                             .fieldSeparator(fieldSeparator)
+                             .skipEmptyLines(true)
+                             .detectBomHeader(true)
+                             .ofCsvRecord(file)) {
 
-            String firstLine =
-                    readNextDataLine(reader);
+            var iterator =
+                    csvReader.iterator();
 
-            if (firstLine == null) {
+            if (!iterator.hasNext()) {
                 throw new IOException(
                         "Delimited time-series file is empty: "
                                 + file
                 );
             }
 
-            String[] header = null;
-            String[] firstDataRow = null;
+            CsvRecord firstRecord =
+                    iterator.next();
 
-            if (hasHeader) {
-                header =
-                        splitLine(firstLine);
-            } else {
-                firstDataRow =
-                        splitLine(firstLine);
+            List<String> firstFields =
+                    firstRecord.getFields();
+
+            if (firstFields.isEmpty()) {
+                throw new IOException(
+                        "Delimited time-series file has no columns: "
+                                + file
+                );
             }
+
+            List<String> header =
+                    hasHeader
+                            ? firstFields
+                            : null;
 
             ColumnSelection selection =
                     resolveColumnSelection(
                             file,
                             header,
-                            firstDataRow
+                            firstFields.size()
                     );
 
-            List<String[]> rows =
-                    new ArrayList<>();
+            SeriesAccumulator accumulator =
+                    createAccumulator(
+                            selection.featureIndices.length
+                    );
 
-            if (firstDataRow != null) {
-                validateRowWidth(
+            int dataRowIndex =
+                    0;
+
+            /*
+             * When there is no header, the first record is also the first
+             * data record and must be materialized.
+             */
+            if (!hasHeader) {
+                appendRecord(
                         file,
-                        1,
-                        firstDataRow,
-                        selection.columnCount
+                        firstRecord,
+                        firstFields,
+                        dataRowIndex,
+                        selection,
+                        accumulator
                 );
 
-                rows.add(firstDataRow);
+                dataRowIndex++;
             }
 
-            String line;
-            int physicalLineNumber =
-                    hasHeader
-                            ? 1
-                            : 0;
+            while (iterator.hasNext()) {
+                CsvRecord record =
+                        iterator.next();
 
-            while ((line = reader.readLine()) != null) {
-                physicalLineNumber++;
+                List<String> fields =
+                        record.getFields();
 
-                /*
-                 * Empty and whitespace-only lines are ignored. This is useful
-                 * for files ending with extra line separators.
-                 */
-                if (line.trim().isEmpty()) {
-                    continue;
-                }
-
-                String[] row =
-                        splitLine(line);
-
-                validateRowWidth(
+                appendRecord(
                         file,
-                        physicalLineNumber,
-                        row,
-                        selection.columnCount
+                        record,
+                        fields,
+                        dataRowIndex,
+                        selection,
+                        accumulator
                 );
 
-                rows.add(row);
+                dataRowIndex++;
             }
 
-            if (rows.isEmpty()) {
+            if (dataRowIndex == 0) {
                 throw new IOException(
                         "Delimited time-series file contains no data rows: "
                                 + file
                 );
             }
 
-            Object series;
-
-            if (isNumeric) {
-                if (hasMissingValues) {
-                    series =
-                            materializeBoxedNumeric(
-                                    file,
-                                    rows,
-                                    selection.featureIndices
-                            );
-                } else {
-                    series =
-                            materializePrimitiveNumeric(
-                                    file,
-                                    rows,
-                                    selection.featureIndices
-                            );
-                }
-            } else {
-                series =
-                        materializeNonnumeric(
-                                rows,
-                                selection.featureIndices
-                        );
-            }
+            Object series =
+                    accumulator.toSeries();
 
             if (standardizationStats != null) {
                 Standardizer.transformInstanceInPlace(
@@ -329,7 +306,152 @@ public class PerFileDelimitedSeriesReader
             }
 
             return series;
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new IOException(
+                    "Failed while parsing delimited time-series file: "
+                            + file,
+                    e
+            );
         }
+    }
+
+    private void appendRecord(
+            Path file,
+            CsvRecord record,
+            List<String> fields,
+            int dataRowIndex,
+            ColumnSelection selection,
+            SeriesAccumulator accumulator
+    ) {
+        validateRecordWidth(
+                file,
+                record,
+                fields.size(),
+                selection.columnCount
+        );
+
+        if (isNumeric) {
+            appendNumericRecord(
+                    file,
+                    fields,
+                    dataRowIndex,
+                    selection.featureIndices,
+                    accumulator
+            );
+        } else {
+            appendNonnumericRecord(
+                    fields,
+                    selection.featureIndices,
+                    accumulator
+            );
+        }
+    }
+
+    private void appendNumericRecord(
+            Path file,
+            List<String> fields,
+            int dataRowIndex,
+            int[] featureIndices,
+            SeriesAccumulator accumulator
+    ) {
+        for (int dimension = 0;
+             dimension < featureIndices.length;
+             dimension++) {
+
+            int columnIndex =
+                    featureIndices[dimension];
+
+            String rawValue =
+                    fields.get(columnIndex);
+
+            String token =
+                    rawValue == null
+                            ? null
+                            : rawValue.trim();
+
+            if (isMissingValue(token)) {
+                if (!hasMissingValues) {
+                    throw new IllegalArgumentException(
+                            "Encountered a missing value in file "
+                                    + file
+                                    + " at data row "
+                                    + dataRowIndex
+                                    + ", column "
+                                    + columnIndex
+                                    + ", but hasMissingValues is false."
+                    );
+                }
+
+                accumulator.addMissing(
+                        dimension
+                );
+
+                continue;
+            }
+
+            try {
+                accumulator.addNumeric(
+                        dimension,
+                        Double.parseDouble(token)
+                );
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(
+                        "Could not parse numeric value '"
+                                + token
+                                + "' in file "
+                                + file
+                                + " at data row "
+                                + dataRowIndex
+                                + ", column "
+                                + columnIndex
+                                + ".",
+                        e
+                );
+            }
+        }
+    }
+
+    private void appendNonnumericRecord(
+            List<String> fields,
+            int[] featureIndices,
+            SeriesAccumulator accumulator
+    ) {
+        for (int dimension = 0;
+             dimension < featureIndices.length;
+             dimension++) {
+
+            int columnIndex =
+                    featureIndices[dimension];
+
+            String value =
+                    fields.get(columnIndex);
+
+            accumulator.addObject(
+                    dimension,
+                    DelimitedFileReader.RowParser.parseValue(
+                            value
+                    )
+            );
+        }
+    }
+
+    private SeriesAccumulator createAccumulator(
+            int dimensionCount
+    ) {
+        if (isNumeric) {
+            return new NumericSeriesAccumulator(
+                    dimensionCount,
+                    hasMissingValues,
+                    DEFAULT_INITIAL_TIME_CAPACITY
+            );
+        }
+
+        return new ObjectSeriesAccumulator(
+                dimensionCount,
+                DEFAULT_INITIAL_TIME_CAPACITY
+        );
     }
 
     private void validateFile(
@@ -363,57 +485,37 @@ public class PerFileDelimitedSeriesReader
         }
     }
 
-    private String readNextDataLine(
-            BufferedReader reader
-    ) throws IOException {
-        String line;
-
-        while ((line = reader.readLine()) != null) {
-            if (!line.trim().isEmpty()) {
-                return line;
-            }
-        }
-
-        return null;
-    }
-
-    private String[] splitLine(
-            String line
-    ) {
-        return line.split(
-                Pattern.quote(entrySeparator),
-                -1
-        );
-    }
-
     private ColumnSelection resolveColumnSelection(
             Path file,
-            String[] header,
-            String[] firstDataRow
+            List<String> header,
+            int columnCount
     ) {
-        int columnCount =
-                header != null
-                        ? header.length
-                        : firstDataRow.length;
-
-        if (columnCount == 0) {
+        if (columnCount <= 0) {
             throw new IllegalArgumentException(
                     "Delimited file has no columns: "
                             + file
             );
         }
 
+        Map<String, Integer> headerIndices =
+                hasHeader
+                        ? buildHeaderIndex(
+                        file,
+                        header
+                )
+                        : Map.of();
+
         int timeColumnIndex =
                 resolveTimeColumnIndex(
                         file,
-                        header,
+                        headerIndices,
                         columnCount
                 );
 
         int[] featureIndices =
                 resolveFeatureIndices(
                         file,
-                        header,
+                        headerIndices,
                         columnCount,
                         timeColumnIndex
                 );
@@ -434,7 +536,7 @@ public class PerFileDelimitedSeriesReader
 
     private int resolveTimeColumnIndex(
             Path file,
-            String[] header,
+            Map<String, Integer> headerIndices,
             int columnCount
     ) {
         if (timeColumn == null) {
@@ -444,7 +546,7 @@ public class PerFileDelimitedSeriesReader
         if (hasHeader) {
             return findNamedColumn(
                     file,
-                    header,
+                    headerIndices,
                     timeColumn,
                     "time"
             );
@@ -469,7 +571,7 @@ public class PerFileDelimitedSeriesReader
 
     private int[] resolveFeatureIndices(
             Path file,
-            String[] header,
+            Map<String, Integer> headerIndices,
             int columnCount,
             int timeColumnIndex
     ) {
@@ -486,7 +588,10 @@ public class PerFileDelimitedSeriesReader
         boolean[] used =
                 new boolean[columnCount];
 
-        for (int i = 0; i < featureColumns.size(); i++) {
+        for (int i = 0;
+             i < featureColumns.size();
+             i++) {
+
             String feature =
                     featureColumns.get(i);
 
@@ -503,7 +608,7 @@ public class PerFileDelimitedSeriesReader
                 index =
                         findNamedColumn(
                                 file,
-                                header,
+                                headerIndices,
                                 feature,
                                 "feature"
                         );
@@ -554,16 +659,10 @@ public class PerFileDelimitedSeriesReader
 
     private int findNamedColumn(
             Path file,
-            String[] header,
+            Map<String, Integer> headerIndices,
             String requestedColumn,
             String role
     ) {
-        Map<String, Integer> headerIndices =
-                buildHeaderIndex(
-                        file,
-                        header
-                );
-
         Integer index =
                 headerIndices.get(
                         requestedColumn
@@ -578,7 +677,7 @@ public class PerFileDelimitedSeriesReader
                             + "' in file "
                             + file
                             + ". Available columns: "
-                            + Arrays.toString(header)
+                            + headerIndices.keySet()
             );
         }
 
@@ -587,19 +686,38 @@ public class PerFileDelimitedSeriesReader
 
     private Map<String, Integer> buildHeaderIndex(
             Path file,
-            String[] header
+            List<String> header
     ) {
-        Map<String, Integer> indices =
-                new HashMap<>();
+        if (header == null) {
+            throw new IllegalArgumentException(
+                    "A header was expected but was not available in file: "
+                            + file
+            );
+        }
 
-        for (int i = 0; i < header.length; i++) {
+        Map<String, Integer> indices =
+                new HashMap<>(
+                        Math.max(
+                                16,
+                                header.size() * 2
+                        )
+                );
+
+        for (int i = 0;
+             i < header.size();
+             i++) {
+
+            String rawName =
+                    header.get(i);
+
             String name =
-                    header[i].trim();
+                    rawName == null
+                            ? ""
+                            : rawName.trim();
 
             if (name.isEmpty()) {
                 throw new IllegalArgumentException(
-                        "Delimited file contains a blank header at "
-                                + "column "
+                        "Delimited file contains a blank header at column "
                                 + i
                                 + ": "
                                 + file
@@ -655,234 +773,6 @@ public class PerFileDelimitedSeriesReader
         return indices;
     }
 
-    private double[][] materializePrimitiveNumeric(
-            Path file,
-            List<String[]> rows,
-            int[] featureIndices
-    ) {
-        double[][] result =
-                new double[featureIndices.length][rows.size()];
-
-        for (int timeIndex = 0;
-             timeIndex < rows.size();
-             timeIndex++) {
-
-            String[] row =
-                    rows.get(timeIndex);
-
-            for (int dimension = 0;
-                 dimension < featureIndices.length;
-                 dimension++) {
-
-                int columnIndex =
-                        featureIndices[dimension];
-
-                String token =
-                        row[columnIndex].trim();
-
-                if (isMissingValue(token)) {
-                    throw new IllegalArgumentException(
-                            "Encountered a missing value in file "
-                                    + file
-                                    + " at data row "
-                                    + timeIndex
-                                    + ", column "
-                                    + columnIndex
-                                    + ", but hasMissingValues is false."
-                    );
-                }
-
-                try {
-                    result[dimension][timeIndex] =
-                            Double.parseDouble(token);
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException(
-                            "Could not parse numeric value '"
-                                    + token
-                                    + "' in file "
-                                    + file
-                                    + " at data row "
-                                    + timeIndex
-                                    + ", column "
-                                    + columnIndex
-                                    + ".",
-                            e
-                    );
-                }
-            }
-        }
-
-        return result;
-    }
-
-    private Double[][] materializeBoxedNumeric(
-            Path file,
-            List<String[]> rows,
-            int[] featureIndices
-    ) {
-        Double[][] result =
-                new Double[featureIndices.length][rows.size()];
-
-        for (int timeIndex = 0;
-             timeIndex < rows.size();
-             timeIndex++) {
-
-            String[] row =
-                    rows.get(timeIndex);
-
-            for (int dimension = 0;
-                 dimension < featureIndices.length;
-                 dimension++) {
-
-                int columnIndex =
-                        featureIndices[dimension];
-
-                String token =
-                        row[columnIndex].trim();
-
-                if (isMissingValue(token)) {
-                    result[dimension][timeIndex] =
-                            null;
-
-                    continue;
-                }
-
-                try {
-                    result[dimension][timeIndex] =
-                            Double.valueOf(token);
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException(
-                            "Could not parse numeric value '"
-                                    + token
-                                    + "' in file "
-                                    + file
-                                    + " at data row "
-                                    + timeIndex
-                                    + ", column "
-                                    + columnIndex
-                                    + ".",
-                            e
-                    );
-                }
-            }
-        }
-
-        return result;
-    }
-
-    /*private Double[][] materializeNumeric(
-            Path file,
-            List<String[]> rows,
-            int[] featureIndices
-    ) {
-        Double[][] result =
-                new Double[featureIndices.length][rows.size()];
-
-        for (int timeIndex = 0;
-             timeIndex < rows.size();
-             timeIndex++) {
-
-            String[] row =
-                    rows.get(timeIndex);
-
-            for (int dimension = 0;
-                 dimension < featureIndices.length;
-                 dimension++) {
-
-                int columnIndex =
-                        featureIndices[dimension];
-
-                String value =
-                        row[columnIndex].trim();
-
-                result[dimension][timeIndex] =
-                        parseNumericValue(
-                                file,
-                                timeIndex,
-                                columnIndex,
-                                value
-                        );
-            }
-        }
-
-        return result;
-    }*/
-
-    /*private Double parseNumericValue(
-            Path file,
-            int timeIndex,
-            int columnIndex,
-            String value
-    ) {
-        if (isMissingValue(value)) {
-            if (!hasMissingValues) {
-                throw new IllegalArgumentException(
-                        "Encountered missing value in file "
-                                + file
-                                + " at data row "
-                                + timeIndex
-                                + ", column "
-                                + columnIndex
-                                + ", but hasMissingValues is false."
-                );
-            }
-
-            return Double.NaN;
-        }
-
-        try {
-            return Double.parseDouble(value);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    "Could not parse numeric value '"
-                            + value
-                            + "' in file "
-                            + file
-                            + " at data row "
-                            + timeIndex
-                            + ", column "
-                            + columnIndex
-                            + ".",
-                    e
-            );
-        }
-    }*/
-
-    private Object[][] materializeNonnumeric(
-            List<String[]> rows,
-            int[] featureIndices
-    ) {
-        Object[][] result =
-                new Object[featureIndices.length][rows.size()];
-
-        for (int timeIndex = 0;
-             timeIndex < rows.size();
-             timeIndex++) {
-
-            String[] row =
-                    rows.get(timeIndex);
-
-            for (int dimension = 0;
-                 dimension < featureIndices.length;
-                 dimension++) {
-
-                String value =
-                        row[featureIndices[dimension]];
-
-                /*if (isMissingValue(value)) {
-                    result[dimension][timeIndex] =
-                            null;
-                } else {
-                    result[dimension][timeIndex] =
-                            value;
-                }*/
-                result[dimension][timeIndex] = DelimitedFileReader.RowParser.parseValue(value);
-            }
-        }
-
-        return result;
-    }
-
     private boolean isMissingValue(
             String value
     ) {
@@ -908,25 +798,27 @@ public class PerFileDelimitedSeriesReader
         );
     }
 
-    private void validateRowWidth(
+    private void validateRecordWidth(
             Path file,
-            int lineNumber,
-            String[] row,
+            CsvRecord record,
+            int actualColumnCount,
             int expectedColumnCount
     ) {
-        if (row.length != expectedColumnCount) {
-            throw new IllegalArgumentException(
-                    "Inconsistent column count in file "
-                            + file
-                            + " at line "
-                            + lineNumber
-                            + ". Expected "
-                            + expectedColumnCount
-                            + " columns but found "
-                            + row.length
-                            + "."
-            );
+        if (actualColumnCount == expectedColumnCount) {
+            return;
         }
+
+        throw new IllegalArgumentException(
+                "Inconsistent column count in file "
+                        + file
+                        + " at CSV record beginning on line "
+                        + record.getStartingLineNumber()
+                        + ". Expected "
+                        + expectedColumnCount
+                        + " columns but found "
+                        + actualColumnCount
+                        + "."
+        );
     }
 
     private int parseColumnIndex(
@@ -972,6 +864,44 @@ public class PerFileDelimitedSeriesReader
         }
     }
 
+    private static String validateAndNormalizeSeparator(
+            String separator
+    ) {
+        if (separator == null || separator.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "PerFileDelimitedSeriesReader requires a non-empty "
+                            + "entry separator."
+            );
+        }
+
+        String normalized =
+                normalizeSeparator(
+                        separator
+                );
+
+        if (normalized.length() != 1) {
+            throw new IllegalArgumentException(
+                    "FastCSV-backed PerFileDelimitedSeriesReader currently "
+                            + "requires a single-character entry separator. "
+                            + "Received: '"
+                            + separator
+                            + "'."
+            );
+        }
+
+        char delimiter =
+                normalized.charAt(0);
+
+        if (delimiter == '\n' || delimiter == '\r') {
+            throw new IllegalArgumentException(
+                    "A line-separator character cannot be used as the "
+                            + "entry separator."
+            );
+        }
+
+        return normalized;
+    }
+
     private static String normalizeSeparator(
             String separator
     ) {
@@ -1010,19 +940,419 @@ public class PerFileDelimitedSeriesReader
         if (!isNumeric) {
             throw new IllegalArgumentException(
                     "Standardization statistics cannot be applied by "
-                            + "PerFileDelimitedSeriesReader when isNumeric=false."
+                            + "PerFileDelimitedSeriesReader when "
+                            + "isNumeric=false."
             );
         }
 
         /*
-         * Empty feature columns are valid for delimited readers. In that case,
-         * dimensions are aligned positionally and the final dimension count is
-         * validated when the realized series is transformed.
+         * Empty feature columns are valid. In that case, dimensions are
+         * aligned positionally and the realized dimension count is validated
+         * by Standardizer when the series is transformed.
          */
         if (!featureColumns.isEmpty()) {
             standardizationStats.validateFeatureCompatibility(
                     featureColumns
             );
+        }
+    }
+
+    private interface SeriesAccumulator {
+
+        default void addNumeric(
+                int dimension,
+                double value
+        ) {
+            throw new UnsupportedOperationException(
+                    "This accumulator does not support numeric values."
+            );
+        }
+
+        default void addMissing(
+                int dimension
+        ) {
+            throw new UnsupportedOperationException(
+                    "This accumulator does not support missing values."
+            );
+        }
+
+        default void addObject(
+                int dimension,
+                Object value
+        ) {
+            throw new UnsupportedOperationException(
+                    "This accumulator does not support object values."
+            );
+        }
+
+        Object toSeries();
+    }
+
+    private static final class NumericSeriesAccumulator
+            implements SeriesAccumulator {
+
+        private final PrimitiveDoubleBuffer[] dimensions;
+        private final MissingPositionBuffer[] missingPositions;
+        private final boolean boxedOutput;
+
+        private NumericSeriesAccumulator(
+                int dimensionCount,
+                boolean boxedOutput,
+                int initialTimeCapacity
+        ) {
+            this.boxedOutput =
+                    boxedOutput;
+
+            this.dimensions =
+                    new PrimitiveDoubleBuffer[dimensionCount];
+
+            this.missingPositions =
+                    boxedOutput
+                            ? new MissingPositionBuffer[dimensionCount]
+                            : null;
+
+            for (int dimension = 0;
+                 dimension < dimensionCount;
+                 dimension++) {
+
+                dimensions[dimension] =
+                        new PrimitiveDoubleBuffer(
+                                initialTimeCapacity
+                        );
+
+                if (boxedOutput) {
+                    missingPositions[dimension] =
+                            new MissingPositionBuffer(
+                                    initialTimeCapacity
+                            );
+                }
+            }
+        }
+
+        @Override
+        public void addNumeric(
+                int dimension,
+                double value
+        ) {
+            dimensions[dimension].add(
+                    value
+            );
+
+            if (boxedOutput) {
+                missingPositions[dimension].add(
+                        false
+                );
+            }
+        }
+
+        @Override
+        public void addMissing(
+                int dimension
+        ) {
+            /*
+             * The numerical placeholder is irrelevant because the
+             * corresponding missing-position entry controls boxing.
+             */
+            dimensions[dimension].add(
+                    0.0
+            );
+
+            if (!boxedOutput) {
+                throw new IllegalStateException(
+                        "Missing numerical values cannot be appended when "
+                                + "boxed output is disabled."
+                );
+            }
+
+            missingPositions[dimension].add(
+                    true
+            );
+        }
+
+        @Override
+        public Object toSeries() {
+            if (!boxedOutput) {
+                double[][] result =
+                        new double[dimensions.length][];
+
+                for (int dimension = 0;
+                     dimension < dimensions.length;
+                     dimension++) {
+
+                    result[dimension] =
+                            dimensions[dimension].toArray();
+                }
+
+                return result;
+            }
+
+            Double[][] result =
+                    new Double[dimensions.length][];
+
+            for (int dimension = 0;
+                 dimension < dimensions.length;
+                 dimension++) {
+
+                result[dimension] =
+                        dimensions[dimension].toNullableBoxedArray(
+                                missingPositions[dimension]
+                        );
+            }
+
+            return result;
+        }
+    }
+
+    private static final class ObjectSeriesAccumulator
+            implements SeriesAccumulator {
+
+        private final ObjectBuffer[] dimensions;
+
+        private ObjectSeriesAccumulator(
+                int dimensionCount,
+                int initialTimeCapacity
+        ) {
+            dimensions =
+                    new ObjectBuffer[dimensionCount];
+
+            for (int dimension = 0;
+                 dimension < dimensionCount;
+                 dimension++) {
+
+                dimensions[dimension] =
+                        new ObjectBuffer(
+                                initialTimeCapacity
+                        );
+            }
+        }
+
+        @Override
+        public void addObject(
+                int dimension,
+                Object value
+        ) {
+            dimensions[dimension].add(
+                    value
+            );
+        }
+
+        @Override
+        public Object toSeries() {
+            Object[][] result =
+                    new Object[dimensions.length][];
+
+            for (int dimension = 0;
+                 dimension < dimensions.length;
+                 dimension++) {
+
+                result[dimension] =
+                        dimensions[dimension].toArray();
+            }
+
+            return result;
+        }
+    }
+
+    private static final class PrimitiveDoubleBuffer {
+
+        private double[] values;
+        private int size;
+
+        private PrimitiveDoubleBuffer(
+                int initialCapacity
+        ) {
+            values =
+                    new double[
+                            Math.max(
+                                    1,
+                                    initialCapacity
+                            )
+                            ];
+        }
+
+        private void add(
+                double value
+        ) {
+            ensureCapacity(
+                    size + 1
+            );
+
+            values[size++] =
+                    value;
+        }
+
+        private double[] toArray() {
+            return Arrays.copyOf(
+                    values,
+                    size
+            );
+        }
+
+        private Double[] toNullableBoxedArray(
+                MissingPositionBuffer missingPositions
+        ) {
+            if (missingPositions.size() != size) {
+                throw new IllegalStateException(
+                        "Numeric-value and missing-position buffers have "
+                                + "different lengths."
+                );
+            }
+
+            Double[] result =
+                    new Double[size];
+
+            for (int i = 0;
+                 i < size;
+                 i++) {
+
+                result[i] =
+                        missingPositions.isMissing(i)
+                                ? null
+                                : values[i];
+            }
+
+            return result;
+        }
+
+        private void ensureCapacity(
+                int requiredCapacity
+        ) {
+            if (requiredCapacity <= values.length) {
+                return;
+            }
+
+            int expandedCapacity =
+                    Math.max(
+                            requiredCapacity,
+                            values.length
+                                    + (values.length >> 1)
+                                    + 1
+                    );
+
+            values =
+                    Arrays.copyOf(
+                            values,
+                            expandedCapacity
+                    );
+        }
+    }
+
+    private static final class MissingPositionBuffer {
+
+        private boolean[] missing;
+        private int size;
+
+        private MissingPositionBuffer(
+                int initialCapacity
+        ) {
+            missing =
+                    new boolean[
+                            Math.max(
+                                    1,
+                                    initialCapacity
+                            )
+                            ];
+        }
+
+        private void add(
+                boolean isMissing
+        ) {
+            ensureCapacity(
+                    size + 1
+            );
+
+            missing[size++] =
+                    isMissing;
+        }
+
+        private boolean isMissing(
+                int index
+        ) {
+            return missing[index];
+        }
+
+        private int size() {
+            return size;
+        }
+
+        private void ensureCapacity(
+                int requiredCapacity
+        ) {
+            if (requiredCapacity <= missing.length) {
+                return;
+            }
+
+            int expandedCapacity =
+                    Math.max(
+                            requiredCapacity,
+                            missing.length
+                                    + (missing.length >> 1)
+                                    + 1
+                    );
+
+            missing =
+                    Arrays.copyOf(
+                            missing,
+                            expandedCapacity
+                    );
+        }
+    }
+
+    private static final class ObjectBuffer {
+
+        private Object[] values;
+        private int size;
+
+        private ObjectBuffer(
+                int initialCapacity
+        ) {
+            values =
+                    new Object[
+                            Math.max(
+                                    1,
+                                    initialCapacity
+                            )
+                            ];
+        }
+
+        private void add(
+                Object value
+        ) {
+            ensureCapacity(
+                    size + 1
+            );
+
+            values[size++] =
+                    value;
+        }
+
+        private Object[] toArray() {
+            return Arrays.copyOf(
+                    values,
+                    size
+            );
+        }
+
+        private void ensureCapacity(
+                int requiredCapacity
+        ) {
+            if (requiredCapacity <= values.length) {
+                return;
+            }
+
+            int expandedCapacity =
+                    Math.max(
+                            requiredCapacity,
+                            values.length
+                                    + (values.length >> 1)
+                                    + 1
+                    );
+
+            values =
+                    Arrays.copyOf(
+                            values,
+                            expandedCapacity
+                    );
         }
     }
 

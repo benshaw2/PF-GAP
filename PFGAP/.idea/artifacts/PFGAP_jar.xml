@@ -12,6 +12,7 @@
       <element id="extracted-dir" path="$PROJECT_DIR$/lib/hdf5/slf4j-api-2.0.18.jar" path-in-jar="/" />
       <element id="extracted-dir" path="$PROJECT_DIR$/lib/parquet/hardwood-core-1.0.0.Final.jar" path-in-jar="/" />
       <element id="extracted-dir" path="$PROJECT_DIR$/lib/parquet/snappy-java-1.1.10.8.jar" path-in-jar="/" />
+      <element id="extracted-dir" path="$PROJECT_DIR$/lib/csv/fastcsv-4.4.0.jar" path-in-jar="/" />
     </root>
   </artifact>
 </component>
