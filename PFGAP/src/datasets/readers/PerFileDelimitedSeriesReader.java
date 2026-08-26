@@ -11,11 +11,7 @@ import preprocessing.standardization.Standardizer;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * Materializes one time series from one delimited file.
@@ -87,6 +83,9 @@ public class PerFileDelimitedSeriesReader
     private static final int DEFAULT_INITIAL_TIME_CAPACITY =
             256;
 
+    private static final int MINIMUM_INITIAL_TIME_CAPACITY =
+            1;
+
     private final String entrySeparator;
     private final char fieldSeparator;
     private final boolean hasHeader;
@@ -95,6 +94,8 @@ public class PerFileDelimitedSeriesReader
     private final boolean isNumeric;
     private final boolean hasMissingValues;
     private final StandardizationStats standardizationStats;
+    private final int initialTimeCapacity;
+    private final Set<String> missingStrings;
 
     public PerFileDelimitedSeriesReader(
             String entrySeparator,
@@ -103,7 +104,8 @@ public class PerFileDelimitedSeriesReader
             List<String> featureColumns,
             boolean isNumeric,
             boolean hasMissingValues,
-            StandardizationStats standardizationStats
+            StandardizationStats standardizationStats,
+            int initialTimeCapacity
     ) {
         this.entrySeparator =
                 validateAndNormalizeSeparator(
@@ -135,7 +137,43 @@ public class PerFileDelimitedSeriesReader
         this.standardizationStats =
                 standardizationStats;
 
+        if (initialTimeCapacity < MINIMUM_INITIAL_TIME_CAPACITY) {
+            throw new IllegalArgumentException(
+                    "PerFileDelimitedSeriesReader initialTimeCapacity "
+                    + "must be as least "
+                    + MINIMUM_INITIAL_TIME_CAPACITY
+                    + ". Received: "
+                    + initialTimeCapacity
+                    + "."
+            );
+        }
+
+        this.initialTimeCapacity = initialTimeCapacity;
+
+        this.missingStrings = snapshotMissingStrings();
+
         validateStandardizationConfiguration();
+    }
+
+    public PerFileDelimitedSeriesReader(
+            String entrySeparator,
+            boolean hasHeader,
+            String timeColumn,
+            List<String> featureColumns,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            StandardizationStats standardizationStats
+    ) {
+        this(
+                entrySeparator,
+                hasHeader,
+                timeColumn,
+                featureColumns,
+                isNumeric,
+                hasMissingValues,
+                null,
+                DEFAULT_INITIAL_TIME_CAPACITY
+        );
     }
 
     public PerFileDelimitedSeriesReader(
@@ -176,8 +214,11 @@ public class PerFileDelimitedSeriesReader
         Path file =
                 reference.getFile();
 
+        //try {
+        //    return readFile(file);
+        //} catch (IOException e) {
         try {
-            return readFile(file);
+            return readFile(file, false);
         } catch (IOException e) {
             throw new IllegalStateException(
                     "Failed to read delimited time-series file: "
@@ -197,10 +238,22 @@ public class PerFileDelimitedSeriesReader
      * @return materialized dimension-major time series
      * @throws IOException when the file cannot be read
      */
-    public Object readFile(
-            Path file
+    public Object readFile(Path file) throws IOException {
+        return readFile(file, true);
+    }
+
+    private Object readFile(
+            Path file, boolean validateFileMetadata
     ) throws IOException {
-        validateFile(file);
+        if (file == null) {
+            throw new IllegalArgumentException(
+                    "PerFileDelimitedSeriesReader requires a non-null file."
+            );
+        }
+        if (validateFileMetadata) {
+            validateFile(file);
+        }
+
 
         try (CsvReader<CsvRecord> csvReader =
                      CsvReader.builder()
@@ -371,7 +424,7 @@ public class PerFileDelimitedSeriesReader
                             ? null
                             : rawValue.trim();
 
-            if (isMissingValue(token)) {
+            if (isMissingToken(token)) {
                 if (!hasMissingValues) {
                     throw new IllegalArgumentException(
                             "Encountered a missing value in file "
@@ -444,25 +497,19 @@ public class PerFileDelimitedSeriesReader
             return new NumericSeriesAccumulator(
                     dimensionCount,
                     hasMissingValues,
-                    DEFAULT_INITIAL_TIME_CAPACITY
+                    initialTimeCapacity
             );
         }
 
         return new ObjectSeriesAccumulator(
                 dimensionCount,
-                DEFAULT_INITIAL_TIME_CAPACITY
+                initialTimeCapacity
         );
     }
 
     private void validateFile(
             Path file
     ) throws IOException {
-        if (file == null) {
-            throw new IllegalArgumentException(
-                    "PerFileDelimitedSeriesReader requires a non-null file."
-            );
-        }
-
         if (!Files.exists(file)) {
             throw new IOException(
                     "Delimited time-series file does not exist: "
@@ -773,28 +820,45 @@ public class PerFileDelimitedSeriesReader
         return indices;
     }
 
-    private boolean isMissingValue(
-            String value
+    private boolean isMissingToken(
+            String token
     ) {
-        if (value == null) {
-            return true;
-        }
+        return token == null
+                || token.isEmpty()
+                || missingStrings.contains(token);
+    }
 
-        String trimmed =
-                value.trim();
-
-        if (trimmed.isEmpty()) {
-            return true;
-        }
-
+    private static Set<String> snapshotMissingStrings() {
         if (AppContext.MissingStrings == null
                 || AppContext.MissingStrings.isEmpty()) {
 
-            return false;
+            return Set.of();
         }
 
-        return AppContext.MissingStrings.contains(
-                trimmed
+        Set<String> snapshot =
+                new HashSet<>();
+
+        for (String value : AppContext.MissingStrings) {
+            if (value == null) {
+                continue;
+            }
+
+            String trimmed =
+                    value.trim();
+
+            if (!trimmed.isEmpty()) {
+                snapshot.add(
+                        trimmed
+                );
+            }
+        }
+
+        if (snapshot.isEmpty()) {
+            return Set.of();
+        }
+
+        return Collections.unmodifiableSet(
+                snapshot
         );
     }
 
@@ -1049,20 +1113,20 @@ public class PerFileDelimitedSeriesReader
         public void addMissing(
                 int dimension
         ) {
-            /*
-             * The numerical placeholder is irrelevant because the
-             * corresponding missing-position entry controls boxing.
-             */
-            dimensions[dimension].add(
-                    0.0
-            );
-
             if (!boxedOutput) {
                 throw new IllegalStateException(
                         "Missing numerical values cannot be appended when "
                                 + "boxed output is disabled."
                 );
             }
+
+            /*
+             * The numerical placeholder is irrelevant because the associated
+             * missing-position entry determines whether the final value is null.
+             */
+            dimensions[dimension].add(
+                    0.0
+            );
 
             missingPositions[dimension].add(
                     true
@@ -1224,10 +1288,13 @@ public class PerFileDelimitedSeriesReader
             int expandedCapacity =
                     Math.max(
                             requiredCapacity,
-                            values.length
-                                    + (values.length >> 1)
-                                    + 1
+                            //values.length + (values.length >> 1) + 1
+                            values.length << 1
                     );
+
+            if (expandedCapacity < 0) {
+                expandedCapacity = Integer.MAX_VALUE;
+            }
 
             values =
                     Arrays.copyOf(
@@ -1285,10 +1352,13 @@ public class PerFileDelimitedSeriesReader
             int expandedCapacity =
                     Math.max(
                             requiredCapacity,
-                            missing.length
-                                    + (missing.length >> 1)
-                                    + 1
+                            //missing.length + (missing.length >> 1) + 1
+                            missing.length << 1
                     );
+
+            if (expandedCapacity < 0) {
+                expandedCapacity = Integer.MAX_VALUE;
+            }
 
             missing =
                     Arrays.copyOf(
@@ -1343,10 +1413,13 @@ public class PerFileDelimitedSeriesReader
             int expandedCapacity =
                     Math.max(
                             requiredCapacity,
-                            values.length
-                                    + (values.length >> 1)
-                                    + 1
+                            //values.length + (values.length >> 1) + 1
+                            values.length <<1
                     );
+
+            if (expandedCapacity < 0) {
+                expandedCapacity = Integer.MAX_VALUE;
+            }
 
             values =
                     Arrays.copyOf(

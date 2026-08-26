@@ -8,9 +8,8 @@
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/../Application/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PFGAP.jar" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/artifacts/PFGAP_jar.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/artifacts/PFGAP_jar.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/PFGAP.iml" beforeDir="false" afterPath="$PROJECT_DIR$/PFGAP.iml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/DelimitedFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/DelimitedFileReader.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedSeriesReader.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
