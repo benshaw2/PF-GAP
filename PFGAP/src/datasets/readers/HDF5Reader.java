@@ -1,5 +1,6 @@
 package datasets.readers;
 
+import ch.randelshofer.fastdoubleparser.JavaDoubleParser;
 import core.AppContext;
 import datasets.ListObjectDataset;
 import io.jhdf.HdfFile;
@@ -9,84 +10,106 @@ import org.apache.commons.lang3.time.DurationFormatUtils;
 import java.io.IOException;
 import java.lang.reflect.Array;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Paths;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
- * Reader for HDF5 / .h5 files.
+ * Eager reader for fixed-size HDF5 datasets.
  *
- * This reader assumes the HDF5 file contains a fixed-size array dataset,
- * usually something like:
+ * <p>The reader expects one primary data dataset, typically {@code /X}, and
+ * optionally one label dataset, typically {@code /y}.</p>
  *
- *      /X
- *      /y
+ * <p>Supported data layouts:</p>
  *
- * Supported data ranks:
- *
+ * <pre>
  * Rank 2:
- *      [N, T] or [N, D]
- *
- *      Each instance becomes:
- *          double[]
- *          Double[]
- *          Object[]
+ *     NT       [instance][time-or-feature]
  *
  * Rank 3:
- *      [N, D, T] by default
- *      [N, T, D] if hdf5Layout = "NTD"
- *
- *      Each instance becomes:
- *          double[][]
- *          Double[][]
- *          Object[][]
- *
- *      Output orientation is always:
- *
- *          dimension x time
+ *     NDT      [instance][dimension][time]
+ *     NTD      [instance][time][dimension]
  *
  * Rank 4:
- *      [N, H, W, C] by default
- *      [N, C, H, W] if hdf5Layout = "NCHW"
+ *     NHWC     [instance][height][width][channel]
+ *     NCHW     [instance][channel][height][width]
+ * </pre>
  *
- *      Each instance becomes:
+ * <p>Rank-3 output is always dimension-major:</p>
  *
- *          double[pixels][channels]
- *          Double[pixels][channels]
- *          Object[pixels][channels]
+ * <pre>
+ * data[dimension][time]
+ * </pre>
  *
- *      where pixels = H * W.
+ * <p>Rank-4 output is always:</p>
  *
- *      This intentionally treats each pixel as a channel vector rather than
- *      forcing image data into a time-series representation.
+ * <pre>
+ * data[pixel][channel]
+ * </pre>
  *
- * Labels:
+ * <p>The optimized implementation provides direct primitive-array paths for
+ * datasets decoded by jHDF as:</p>
  *
- *      No label dataset:
- *          label = null
+ * <ul>
+ *     <li>{@code double[][]}, {@code double[][][]},
+ *         {@code double[][][][]}</li>
+ *     <li>{@code float[][]}, {@code float[][][]},
+ *         {@code float[][][][]}</li>
+ *     <li>{@code int[][]}, {@code int[][][]},
+ *         {@code int[][][][]}</li>
+ *     <li>{@code long[][]}, {@code long[][][]},
+ *         {@code long[][][][]}</li>
+ * </ul>
  *
- *      Label dataset shape *          scalar Object label
+ * <p>In the common FLOAT64 NDT case, the reader can retain the decoded
+ * instance arrays directly without scalar-level reflection, boxing, or
+ * copying. Other primitive numeric types are converted to PFGAP doubles using
+ * typed primitive loops.</p>
  *
- *      Label dataset shape [N, K]:
- *          List<Object> label
+ * <p>Reflection is retained only as a generic fallback for uncommon numeric
+ * types, strings, Booleans, byte arrays, and object datasets.</p>
  *
- * Numeric hints:
+ * <p>Missing-value behavior:</p>
  *
- *      isNumeric = true, hasMissingValues = false:
- *          try to produce primitive double arrays.
- *
- *      isNumeric = true, hasMissingValues = true:
- *          produce boxed Double arrays.
- *
- *      isNumeric = false:
- *          produce Object arrays.
+ * <ul>
+ *     <li>
+ *         Primitive HDF5 nulls are generally unavailable. HDF5 numerical
+ *         missingness is commonly represented through NaN, fill values, or a
+ *         separate mask dataset.
+ *     </li>
+ *     <li>
+ *         With {@code hasMissingValues=true}, boxed arrays are returned.
+ *         Literal NaN remains {@code Double.NaN}; it is not automatically
+ *         converted to null.
+ *     </li>
+ *     <li>
+ *         Generic null or configured textual missing values become null.
+ *     </li>
+ * </ul>
  */
-public class HDF5Reader implements DatasetReader {
+public class HDF5Reader
+        implements DatasetReader {
 
-    private static final String DEFAULT_LAYOUT = "AUTO";
-    private static final boolean DEFAULT_COLLAPSE_SINGLETON_DIMENSION = false;
+    public enum Hdf5Layout {
+        AUTO,
+        NT,
+        NDT,
+        NTD,
+        NHWC,
+        NCHW
+    }
+
+    private static final Hdf5Layout DEFAULT_LAYOUT =
+            Hdf5Layout.AUTO;
+
+    private static final boolean
+            DEFAULT_COLLAPSE_SINGLETON_DIMENSION =
+            false;
 
     private final String dataFileName;
     private final String hdf5DatasetPath;
@@ -96,38 +119,15 @@ public class HDF5Reader implements DatasetReader {
     private final boolean hasMissingValues;
     private final boolean isRegression;
 
-    /*
-     * Supported values:
-     *
-     *      AUTO
-     *      NT
-     *      NDT
-     *      NTD
-     *      NHWC
-     *      NCHW
-     *
-     * ReaderOptions does not expose this yet, so the ReaderOptions constructor
-     * currently defaults to AUTO. A direct constructor is provided for future
-     * use.
-     */
-    private final String hdf5Layout;
-
-    /*
-     * If true:
-     *
-     *      [N, 1, T] -> double[] / Double[] / Object[]
-     *
-     * If false:
-     *
-     *      [N, 1, T] -> double[][] / Double[][] / Object[][]
-     *
-     * Default is false to preserve declared HDF5 rank.
-     */
+    private final Hdf5Layout hdf5Layout;
     private final boolean collapseSingletonDimension;
+    private final Set<String> missingIndicators;
 
-    public HDF5Reader(ReaderOptions options) {
+    public HDF5Reader(
+            ReaderOptions options
+    ) {
         this(
-                options.getDataPath(),
+                requireOptions(options).getDataPath(),
                 options.getHdf5DatasetPath(),
                 options.getHdf5LabelDatasetPath(),
                 options.isNumeric(),
@@ -158,6 +158,9 @@ public class HDF5Reader implements DatasetReader {
         );
     }
 
+    /**
+     * Backward-compatible constructor accepting a layout string.
+     */
     public HDF5Reader(
             String dataFileName,
             String hdf5DatasetPath,
@@ -168,826 +171,2572 @@ public class HDF5Reader implements DatasetReader {
             String hdf5Layout,
             boolean collapseSingletonDimension
     ) {
-        this.dataFileName = dataFileName;
-        this.hdf5DatasetPath = hdf5DatasetPath;
-        this.hdf5LabelDatasetPath = hdf5LabelDatasetPath;
-        this.isNumeric = isNumeric;
-        this.hasMissingValues = hasMissingValues;
-        this.isRegression = isRegression;
+        this(
+                dataFileName,
+                hdf5DatasetPath,
+                hdf5LabelDatasetPath,
+                isNumeric,
+                hasMissingValues,
+                isRegression,
+                parseLayout(hdf5Layout),
+                collapseSingletonDimension
+        );
+    }
+
+    public HDF5Reader(
+            String dataFileName,
+            String hdf5DatasetPath,
+            String hdf5LabelDatasetPath,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            boolean isRegression,
+            Hdf5Layout hdf5Layout,
+            boolean collapseSingletonDimension
+    ) {
+        this.dataFileName =
+                requireNonblank(
+                        dataFileName,
+                        "dataFileName"
+                );
+
+        this.hdf5DatasetPath =
+                requireNonblank(
+                        hdf5DatasetPath,
+                        "hdf5DatasetPath"
+                );
+
+        this.hdf5LabelDatasetPath =
+                normalizeNullableString(
+                        hdf5LabelDatasetPath
+                );
+
+        this.isNumeric =
+                isNumeric;
+
+        this.hasMissingValues =
+                hasMissingValues;
+
+        this.isRegression =
+                isRegression;
+
         this.hdf5Layout =
-                hdf5Layout == null || hdf5Layout.trim().isEmpty()
+                hdf5Layout == null
                         ? DEFAULT_LAYOUT
-                        : hdf5Layout.trim().toUpperCase();
-        this.collapseSingletonDimension = collapseSingletonDimension;
+                        : hdf5Layout;
+
+        this.collapseSingletonDimension =
+                collapseSingletonDimension;
+
+        this.missingIndicators =
+                snapshotMissingIndicators();
     }
 
     @Override
-    public ListObjectDataset read() throws IOException {
+    public ListObjectDataset read()
+            throws IOException {
 
-        validateOptions();
+        Path file =
+                validateFile();
 
-        long start = System.nanoTime();
+        long start =
+                System.nanoTime();
 
-        ListObjectDataset dataset = new ListObjectDataset();
+        try (HdfFile hdfFile =
+                     new HdfFile(
+                             file
+                     )) {
 
-        try (HdfFile hdfFile = new HdfFile(Paths.get(dataFileName))) {
+            Dataset xDataset =
+                    requireDataset(
+                            hdfFile,
+                            hdf5DatasetPath,
+                            "data"
+                    );
 
-            Dataset xDataset = hdfFile.getDatasetByPath(hdf5DatasetPath);
+            int[] dataShape =
+                    toIntShape(
+                            xDataset.getDimensions()
+                    );
 
-            if (xDataset == null) {
+            validateDataShape(
+                    dataShape
+            );
+
+            Hdf5Layout effectiveLayout =
+                    resolveEffectiveLayout(
+                            dataShape.length
+                    );
+
+            validateLayoutForRank(
+                    effectiveLayout,
+                    dataShape.length
+            );
+
+            int instanceCount =
+                    dataShape[0];
+
+            if (instanceCount == 0) {
                 throw new IllegalArgumentException(
-                        "HDF5 dataset not found: " + hdf5DatasetPath
-                );
-            }
-
-            Object rawData = xDataset.getData();
-            int[] dataShape = toIntShape(xDataset.getDimensions());
-
-            if (dataShape.length < 2 || dataShape.length > 4) {
-                throw new IllegalArgumentException(
-                        "HDF5Reader supports data ranks 2, 3, and 4. Found rank "
-                                + dataShape.length
-                                + " for dataset "
+                        "HDF5 data dataset contains no instances: "
                                 + hdf5DatasetPath
                 );
             }
 
-            int nInstances = dataShape[0];
+            Object rawData =
+                    xDataset.getData();
 
-            Object rawLabels = null;
-            int[] labelShape = null;
+            if (rawData == null) {
+                throw new IllegalArgumentException(
+                        "jHDF returned null data for dataset: "
+                                + hdf5DatasetPath
+                );
+            }
 
-            if (hdf5LabelDatasetPath != null
-                    && !hdf5LabelDatasetPath.trim().isEmpty()) {
+            Object rawLabels =
+                    null;
 
+            int[] labelShape =
+                    null;
+
+            if (hdf5LabelDatasetPath != null) {
                 Dataset yDataset =
-                        hdfFile.getDatasetByPath(hdf5LabelDatasetPath);
+                        requireDataset(
+                                hdfFile,
+                                hdf5LabelDatasetPath,
+                                "label"
+                        );
 
-                if (yDataset == null) {
-                    throw new IllegalArgumentException(
-                            "HDF5 label dataset not found: "
-                                    + hdf5LabelDatasetPath
+                labelShape =
+                        toIntShape(
+                                yDataset.getDimensions()
+                        );
+
+                validateLabelShape(
+                        labelShape,
+                        instanceCount
+                );
+
+                rawLabels =
+                        yDataset.getData();
+            }
+
+            ListObjectDataset dataset =
+                    new ListObjectDataset(
+                            instanceCount
+                    );
+
+            for (int instanceIndex = 0;
+                 instanceIndex < instanceCount;
+                 instanceIndex++) {
+
+                Object data =
+                        buildInstance(
+                                rawData,
+                                dataShape,
+                                instanceIndex,
+                                effectiveLayout
+                        );
+
+                Object label =
+                        buildLabel(
+                                rawLabels,
+                                labelShape,
+                                instanceIndex
+                        );
+
+                dataset.add(
+                        label,
+                        data,
+                        instanceIndex
+                );
+
+                if (instanceIndex > 0) {
+                    ProgressLogger.logProgress(
+                            instanceIndex
                     );
                 }
-
-                rawLabels = yDataset.getData();
-                labelShape = toIntShape(yDataset.getDimensions());
-
-                validateLabelShape(labelShape, nInstances);
             }
 
-            for (int i = 0; i < nInstances; i++) {
+            int commonLength =
+                    calculateCommonLength(
+                            dataShape,
+                            effectiveLayout
+                    );
 
-                Object data = buildInstance(rawData, dataShape, i);
-                Object label = buildLabel(rawLabels, labelShape, i);
+            dataset.setLength(
+                    commonLength
+            );
 
-                dataset.add(label, data, i);
+            AppContext.length =
+                    commonLength;
 
-                updateGlobalLength(data);
+            long end =
+                    System.nanoTime();
 
-                ProgressLogger.logProgress(i);
-            }
+            ProgressLogger.logDuration(
+                    start,
+                    end
+            );
+
+            return dataset;
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new IOException(
+                    "Failed while reading HDF5 data file: "
+                            + file,
+                    e
+            );
         }
-
-        long end = System.nanoTime();
-        ProgressLogger.logDuration(start, end);
-
-        return dataset;
     }
 
     private Object buildInstance(
             Object rawData,
             int[] shape,
-            int instanceIndex
+            int instanceIndex,
+            Hdf5Layout layout
     ) {
-
-        switch (shape.length) {
-            case 2:
-                return buildRank2Instance(rawData, shape, instanceIndex);
-
-            case 3:
-                return buildRank3Instance(rawData, shape, instanceIndex);
-
-            case 4:
-                return buildRank4Instance(rawData, shape, instanceIndex);
-
-            default:
-                throw new IllegalArgumentException(
-                        "Unsupported HDF5 data rank: " + shape.length
-                );
-        }
-    }
-
-    /**
-     * Rank 2:
-     *
-     *      [N, T] or [N, D]
-     *
-     * In either case, PFGAP sees one 1D array per instance.
-     */
-    private Object buildRank2Instance(
-            Object rawData,
-            int[] shape,
-            int instanceIndex
-    ) {
-
-        int length = shape[1];
-
-        if (isNumeric) {
-
-            if (hasMissingValues) {
-                Double[] data = new Double[length];
-
-                for (int t = 0; t < length; t++) {
-                    data[t] = toBoxedDouble(
-                            getValue(rawData, instanceIndex, t)
-                    );
-                }
-
-                return data;
-            }
-
-            double[] data = new double[length];
-
-            for (int t = 0; t < length; t++) {
-                data[t] = toPrimitiveDouble(
-                        getValue(rawData, instanceIndex, t)
-                );
-            }
-
-            return data;
-        }
-
-        Object[] data = new Object[length];
-
-        for (int t = 0; t < length; t++) {
-            data[t] = parseGenericValue(
-                    getValue(rawData, instanceIndex, t)
+        /*
+         * FLOAT64 is the most direct and fastest PFGAP representation.
+         */
+        if (rawData instanceof double[][] array) {
+            return buildRank2DoubleInstance(
+                    array,
+                    instanceIndex
             );
         }
 
-        return data;
+        if (rawData instanceof double[][][] array) {
+            return buildRank3DoubleInstance(
+                    array,
+                    instanceIndex,
+                    layout
+            );
+        }
+
+        if (rawData instanceof double[][][][] array) {
+            return buildRank4DoubleInstance(
+                    array,
+                    instanceIndex,
+                    layout
+            );
+        }
+
+        /*
+         * FLOAT32 conversion paths.
+         */
+        if (rawData instanceof float[][] array) {
+            return buildRank2FloatInstance(
+                    array,
+                    instanceIndex
+            );
+        }
+
+        if (rawData instanceof float[][][] array) {
+            return buildRank3FloatInstance(
+                    array,
+                    instanceIndex,
+                    layout
+            );
+        }
+
+        if (rawData instanceof float[][][][] array) {
+            return buildRank4FloatInstance(
+                    array,
+                    instanceIndex,
+                    layout
+            );
+        }
+
+        /*
+         * Integer conversion paths.
+         */
+        if (rawData instanceof int[][] array) {
+            return buildRank2IntInstance(
+                    array,
+                    instanceIndex
+            );
+        }
+
+        if (rawData instanceof int[][][] array) {
+            return buildRank3IntInstance(
+                    array,
+                    instanceIndex,
+                    layout
+            );
+        }
+
+        if (rawData instanceof int[][][][] array) {
+            return buildRank4IntInstance(
+                    array,
+                    instanceIndex,
+                    layout
+            );
+        }
+
+        if (rawData instanceof long[][] array) {
+            return buildRank2LongInstance(
+                    array,
+                    instanceIndex
+            );
+        }
+
+        if (rawData instanceof long[][][] array) {
+            return buildRank3LongInstance(
+                    array,
+                    instanceIndex,
+                    layout
+            );
+        }
+
+        if (rawData instanceof long[][][][] array) {
+            return buildRank4LongInstance(
+                    array,
+                    instanceIndex,
+                    layout
+            );
+        }
+
+        /*
+         * Generic compatibility fallback.
+         */
+        return buildGenericInstance(
+                rawData,
+                shape,
+                instanceIndex,
+                layout
+        );
     }
 
-    /**
-     * Rank 3:
-     *
-     * Default/AUTO/NDT:
-     *
-     *      [N, D, T]
-     *
-     * NTD:
-     *
-     *      [N, T, D]
-     *
-     * Output orientation:
-     *
-     *      dimension x time
+    /*
+     * ---------------------------------------------------------------------
+     * FLOAT64 fast paths
+     * ---------------------------------------------------------------------
      */
-    private Object buildRank3Instance(
+
+    private Object buildRank2DoubleInstance(
+            double[][] rawData,
+            int instanceIndex
+    ) {
+        double[] source =
+                rawData[instanceIndex];
+
+        if (!isNumeric) {
+            return boxAsObjects(
+                    source
+            );
+        }
+
+        if (hasMissingValues) {
+            return boxDoubles(
+                    source
+            );
+        }
+
+        /*
+         * jHDF has already produced exactly the PFGAP representation.
+         * Retaining the row avoids an unnecessary complete data copy.
+         */
+        return source;
+    }
+
+    private Object buildRank3DoubleInstance(
+            double[][][] rawData,
+            int instanceIndex,
+            Hdf5Layout layout
+    ) {
+        double[][] source =
+                rawData[instanceIndex];
+
+        if (layout == Hdf5Layout.NTD) {
+            double[][] transposed =
+                    transposeDouble(
+                            source
+                    );
+
+            return convertRank2DoubleResult(
+                    transposed
+            );
+        }
+
+        if (collapseSingletonDimension
+                && source.length == 1) {
+
+            return convertRank1DoubleResult(
+                    source[0]
+            );
+        }
+
+        return convertRank2DoubleResult(
+                source
+        );
+    }
+
+    private Object buildRank4DoubleInstance(
+            double[][][][] rawData,
+            int instanceIndex,
+            Hdf5Layout layout
+    ) {
+        double[][][] source =
+                rawData[instanceIndex];
+
+        double[][] flattened =
+                layout == Hdf5Layout.NCHW
+                        ? flattenNchwDouble(source)
+                        : flattenNhwcDouble(source);
+
+        return convertRank2DoubleResult(
+                flattened
+        );
+    }
+
+    private Object convertRank1DoubleResult(
+            double[] source
+    ) {
+        if (!isNumeric) {
+            return boxAsObjects(
+                    source
+            );
+        }
+
+        if (hasMissingValues) {
+            return boxDoubles(
+                    source
+            );
+        }
+
+        return source;
+    }
+
+    private Object convertRank2DoubleResult(
+            double[][] source
+    ) {
+        if (!isNumeric) {
+            Object[][] result =
+                    new Object[source.length][];
+
+            for (int index = 0;
+                 index < source.length;
+                 index++) {
+
+                result[index] =
+                        boxAsObjects(
+                                source[index]
+                        );
+            }
+
+            return result;
+        }
+
+        if (hasMissingValues) {
+            Double[][] result =
+                    new Double[source.length][];
+
+            for (int index = 0;
+                 index < source.length;
+                 index++) {
+
+                result[index] =
+                        boxDoubles(
+                                source[index]
+                        );
+            }
+
+            return result;
+        }
+
+        return source;
+    }
+
+    /*
+     * ---------------------------------------------------------------------
+     * FLOAT32 paths
+     * ---------------------------------------------------------------------
+     */
+
+    private Object buildRank2FloatInstance(
+            float[][] rawData,
+            int instanceIndex
+    ) {
+        return convertRank1DoubleResult(
+                toDoubleArray(
+                        rawData[instanceIndex]
+                )
+        );
+    }
+
+    private Object buildRank3FloatInstance(
+            float[][][] rawData,
+            int instanceIndex,
+            Hdf5Layout layout
+    ) {
+        float[][] source =
+                rawData[instanceIndex];
+
+        double[][] converted =
+                layout == Hdf5Layout.NTD
+                        ? transposeFloatToDouble(source)
+                        : toDoubleMatrix(source);
+
+        if (collapseSingletonDimension
+                && converted.length == 1) {
+
+            return convertRank1DoubleResult(
+                    converted[0]
+            );
+        }
+
+        return convertRank2DoubleResult(
+                converted
+        );
+    }
+
+    private Object buildRank4FloatInstance(
+            float[][][][] rawData,
+            int instanceIndex,
+            Hdf5Layout layout
+    ) {
+        float[][][] source =
+                rawData[instanceIndex];
+
+        double[][] flattened =
+                layout == Hdf5Layout.NCHW
+                        ? flattenNchwFloat(source)
+                        : flattenNhwcFloat(source);
+
+        return convertRank2DoubleResult(
+                flattened
+        );
+    }
+
+    /*
+     * ---------------------------------------------------------------------
+     * INT32 paths
+     * ---------------------------------------------------------------------
+     */
+
+    private Object buildRank2IntInstance(
+            int[][] rawData,
+            int instanceIndex
+    ) {
+        return convertRank1DoubleResult(
+                toDoubleArray(
+                        rawData[instanceIndex]
+                )
+        );
+    }
+
+    private Object buildRank3IntInstance(
+            int[][][] rawData,
+            int instanceIndex,
+            Hdf5Layout layout
+    ) {
+        int[][] source =
+                rawData[instanceIndex];
+
+        double[][] converted =
+                layout == Hdf5Layout.NTD
+                        ? transposeIntToDouble(source)
+                        : toDoubleMatrix(source);
+
+        if (collapseSingletonDimension
+                && converted.length == 1) {
+
+            return convertRank1DoubleResult(
+                    converted[0]
+            );
+        }
+
+        return convertRank2DoubleResult(
+                converted
+        );
+    }
+
+    private Object buildRank4IntInstance(
+            int[][][][] rawData,
+            int instanceIndex,
+            Hdf5Layout layout
+    ) {
+        int[][][] source =
+                rawData[instanceIndex];
+
+        double[][] flattened =
+                layout == Hdf5Layout.NCHW
+                        ? flattenNchwInt(source)
+                        : flattenNhwcInt(source);
+
+        return convertRank2DoubleResult(
+                flattened
+        );
+    }
+
+    /*
+     * ---------------------------------------------------------------------
+     * INT64 paths
+     * ---------------------------------------------------------------------
+     */
+
+    private Object buildRank2LongInstance(
+            long[][] rawData,
+            int instanceIndex
+    ) {
+        return convertRank1DoubleResult(
+                toDoubleArray(
+                        rawData[instanceIndex]
+                )
+        );
+    }
+
+    private Object buildRank3LongInstance(
+            long[][][] rawData,
+            int instanceIndex,
+            Hdf5Layout layout
+    ) {
+        long[][] source =
+                rawData[instanceIndex];
+
+        double[][] converted =
+                layout == Hdf5Layout.NTD
+                        ? transposeLongToDouble(source)
+                        : toDoubleMatrix(source);
+
+        if (collapseSingletonDimension
+                && converted.length == 1) {
+
+            return convertRank1DoubleResult(
+                    converted[0]
+            );
+        }
+
+        return convertRank2DoubleResult(
+                converted
+        );
+    }
+
+    private Object buildRank4LongInstance(
+            long[][][][] rawData,
+            int instanceIndex,
+            Hdf5Layout layout
+    ) {
+        long[][][] source =
+                rawData[instanceIndex];
+
+        double[][] flattened =
+                layout == Hdf5Layout.NCHW
+                        ? flattenNchwLong(source)
+                        : flattenNhwcLong(source);
+
+        return convertRank2DoubleResult(
+                flattened
+        );
+    }
+
+    /*
+     * ---------------------------------------------------------------------
+     * Generic reflective fallback
+     * ---------------------------------------------------------------------
+     */
+
+    private Object buildGenericInstance(
+            Object rawData,
+            int[] shape,
+            int instanceIndex,
+            Hdf5Layout layout
+    ) {
+        return switch (shape.length) {
+            case 2 ->
+                    buildGenericRank2(
+                            rawData,
+                            shape,
+                            instanceIndex
+                    );
+
+            case 3 ->
+                    buildGenericRank3(
+                            rawData,
+                            shape,
+                            instanceIndex,
+                            layout
+                    );
+
+            case 4 ->
+                    buildGenericRank4(
+                            rawData,
+                            shape,
+                            instanceIndex,
+                            layout
+                    );
+
+            default ->
+                    throw new IllegalArgumentException(
+                            "Unsupported HDF5 data rank: "
+                                    + shape.length
+                    );
+        };
+    }
+
+    private Object buildGenericRank2(
             Object rawData,
             int[] shape,
             int instanceIndex
     ) {
+        int length =
+                shape[1];
 
-        boolean isNTD = hdf5Layout.equals("NTD");
+        if (isNumeric) {
+            if (hasMissingValues) {
+                Double[] result =
+                        new Double[length];
 
-        int dimensionCount;
-        int timeLength;
+                for (int index = 0;
+                     index < length;
+                     index++) {
 
-        if (isNTD) {
-            timeLength = shape[1];
-            dimensionCount = shape[2];
-        } else {
-            dimensionCount = shape[1];
-            timeLength = shape[2];
+                    result[index] =
+                            toBoxedDouble(
+                                    getValue(
+                                            rawData,
+                                            instanceIndex,
+                                            index
+                                    )
+                            );
+                }
+
+                return result;
+            }
+
+            double[] result =
+                    new double[length];
+
+            for (int index = 0;
+                 index < length;
+                 index++) {
+
+                result[index] =
+                        toPrimitiveDouble(
+                                getValue(
+                                        rawData,
+                                        instanceIndex,
+                                        index
+                                )
+                        );
+            }
+
+            return result;
         }
 
-        if (collapseSingletonDimension && dimensionCount == 1) {
-            return buildCollapsedRank3Instance(
+        Object[] result =
+                new Object[length];
+
+        for (int index = 0;
+             index < length;
+             index++) {
+
+            result[index] =
+                    parseGenericValue(
+                            getValue(
+                                    rawData,
+                                    instanceIndex,
+                                    index
+                            )
+                    );
+        }
+
+        return result;
+    }
+
+    private Object buildGenericRank3(
+            Object rawData,
+            int[] shape,
+            int instanceIndex,
+            Hdf5Layout layout
+    ) {
+        boolean ntd =
+                layout == Hdf5Layout.NTD;
+
+        int dimensionCount =
+                ntd
+                        ? shape[2]
+                        : shape[1];
+
+        int timeLength =
+                ntd
+                        ? shape[1]
+                        : shape[2];
+
+        if (collapseSingletonDimension
+                && dimensionCount == 1) {
+
+            return buildGenericCollapsedRank3(
                     rawData,
-                    shape,
                     instanceIndex,
-                    isNTD,
+                    ntd,
                     timeLength
             );
         }
 
         if (isNumeric) {
-
             if (hasMissingValues) {
-                Double[][] data = new Double[dimensionCount][timeLength];
+                Double[][] result =
+                        new Double[dimensionCount][timeLength];
 
-                for (int d = 0; d < dimensionCount; d++) {
-                    for (int t = 0; t < timeLength; t++) {
-                        Object value =
-                                isNTD
-                                        ? getValue(rawData, instanceIndex, t, d)
-                                        : getValue(rawData, instanceIndex, d, t);
+                for (int dimension = 0;
+                     dimension < dimensionCount;
+                     dimension++) {
 
-                        data[d][t] = toBoxedDouble(value);
+                    for (int time = 0;
+                         time < timeLength;
+                         time++) {
+
+                        result[dimension][time] =
+                                toBoxedDouble(
+                                        ntd
+                                                ? getValue(
+                                                rawData,
+                                                instanceIndex,
+                                                time,
+                                                dimension
+                                        )
+                                                : getValue(
+                                                rawData,
+                                                instanceIndex,
+                                                dimension,
+                                                time
+                                        )
+                                );
                     }
                 }
 
-                return data;
+                return result;
             }
 
-            double[][] data = new double[dimensionCount][timeLength];
+            double[][] result =
+                    new double[dimensionCount][timeLength];
 
-            for (int d = 0; d < dimensionCount; d++) {
-                for (int t = 0; t < timeLength; t++) {
-                    Object value =
-                            isNTD
-                                    ? getValue(rawData, instanceIndex, t, d)
-                                    : getValue(rawData, instanceIndex, d, t);
+            for (int dimension = 0;
+                 dimension < dimensionCount;
+                 dimension++) {
 
-                    data[d][t] = toPrimitiveDouble(value);
+                for (int time = 0;
+                     time < timeLength;
+                     time++) {
+
+                    result[dimension][time] =
+                            toPrimitiveDouble(
+                                    ntd
+                                            ? getValue(
+                                            rawData,
+                                            instanceIndex,
+                                            time,
+                                            dimension
+                                    )
+                                            : getValue(
+                                            rawData,
+                                            instanceIndex,
+                                            dimension,
+                                            time
+                                    )
+                            );
                 }
             }
 
-            return data;
+            return result;
         }
 
-        Object[][] data = new Object[dimensionCount][timeLength];
+        Object[][] result =
+                new Object[dimensionCount][timeLength];
 
-        for (int d = 0; d < dimensionCount; d++) {
-            for (int t = 0; t < timeLength; t++) {
-                Object value =
-                        isNTD
-                                ? getValue(rawData, instanceIndex, t, d)
-                                : getValue(rawData, instanceIndex, d, t);
+        for (int dimension = 0;
+             dimension < dimensionCount;
+             dimension++) {
 
-                data[d][t] = parseGenericValue(value);
+            for (int time = 0;
+                 time < timeLength;
+                 time++) {
+
+                result[dimension][time] =
+                        parseGenericValue(
+                                ntd
+                                        ? getValue(
+                                        rawData,
+                                        instanceIndex,
+                                        time,
+                                        dimension
+                                )
+                                        : getValue(
+                                        rawData,
+                                        instanceIndex,
+                                        dimension,
+                                        time
+                                )
+                        );
             }
         }
 
-        return data;
+        return result;
     }
 
-    private Object buildCollapsedRank3Instance(
+    private Object buildGenericCollapsedRank3(
+            Object rawData,
+            int instanceIndex,
+            boolean ntd,
+            int timeLength
+    ) {
+        if (isNumeric) {
+            if (hasMissingValues) {
+                Double[] result =
+                        new Double[timeLength];
+
+                for (int time = 0;
+                     time < timeLength;
+                     time++) {
+
+                    result[time] =
+                            toBoxedDouble(
+                                    ntd
+                                            ? getValue(
+                                            rawData,
+                                            instanceIndex,
+                                            time,
+                                            0
+                                    )
+                                            : getValue(
+                                            rawData,
+                                            instanceIndex,
+                                            0,
+                                            time
+                                    )
+                            );
+                }
+
+                return result;
+            }
+
+            double[] result =
+                    new double[timeLength];
+
+            for (int time = 0;
+                 time < timeLength;
+                 time++) {
+
+                result[time] =
+                        toPrimitiveDouble(
+                                ntd
+                                        ? getValue(
+                                        rawData,
+                                        instanceIndex,
+                                        time,
+                                        0
+                                )
+                                        : getValue(
+                                        rawData,
+                                        instanceIndex,
+                                        0,
+                                        time
+                                )
+                        );
+            }
+
+            return result;
+        }
+
+        Object[] result =
+                new Object[timeLength];
+
+        for (int time = 0;
+             time < timeLength;
+             time++) {
+
+            result[time] =
+                    parseGenericValue(
+                            ntd
+                                    ? getValue(
+                                    rawData,
+                                    instanceIndex,
+                                    time,
+                                    0
+                            )
+                                    : getValue(
+                                    rawData,
+                                    instanceIndex,
+                                    0,
+                                    time
+                            )
+                    );
+        }
+
+        return result;
+    }
+
+    private Object buildGenericRank4(
             Object rawData,
             int[] shape,
             int instanceIndex,
-            boolean isNTD,
-            int timeLength
+            Hdf5Layout layout
     ) {
+        boolean nchw =
+                layout == Hdf5Layout.NCHW;
+
+        int channels =
+                nchw
+                        ? shape[1]
+                        : shape[3];
+
+        int height =
+                nchw
+                        ? shape[2]
+                        : shape[1];
+
+        int width =
+                nchw
+                        ? shape[3]
+                        : shape[2];
+
+        int pixels =
+                Math.multiplyExact(
+                        height,
+                        width
+                );
 
         if (isNumeric) {
-
             if (hasMissingValues) {
-                Double[] data = new Double[timeLength];
+                Double[][] result =
+                        new Double[pixels][channels];
 
-                for (int t = 0; t < timeLength; t++) {
-                    Object value =
-                            isNTD
-                                    ? getValue(rawData, instanceIndex, t, 0)
-                                    : getValue(rawData, instanceIndex, 0, t);
+                for (int heightIndex = 0;
+                     heightIndex < height;
+                     heightIndex++) {
 
-                    data[t] = toBoxedDouble(value);
-                }
+                    for (int widthIndex = 0;
+                         widthIndex < width;
+                         widthIndex++) {
 
-                return data;
-            }
+                        int pixel =
+                                heightIndex * width
+                                        + widthIndex;
 
-            double[] data = new double[timeLength];
+                        for (int channel = 0;
+                             channel < channels;
+                             channel++) {
 
-            for (int t = 0; t < timeLength; t++) {
-                Object value =
-                        isNTD
-                                ? getValue(rawData, instanceIndex, t, 0)
-                                : getValue(rawData, instanceIndex, 0, t);
-
-                data[t] = toPrimitiveDouble(value);
-            }
-
-            return data;
-        }
-
-        Object[] data = new Object[timeLength];
-
-        for (int t = 0; t < timeLength; t++) {
-            Object value =
-                    isNTD
-                            ? getValue(rawData, instanceIndex, t, 0)
-                            : getValue(rawData, instanceIndex, 0, t);
-
-            data[t] = parseGenericValue(value);
-        }
-
-        return data;
-    }
-
-    /**
-     * Rank 4:
-     *
-     * Default/AUTO/NHWC:
-     *
-     *      [N, H, W, C]
-     *
-     * NCHW:
-     *
-     *      [N, C, H, W]
-     *
-     * Output:
-     *
-     *      pixels x channels
-     *
-     * where:
-     *
-     *      pixels = H * W
-     *
-     * This intentionally represents each pixel as a channel vector.
-     */
-    private Object buildRank4Instance(
-            Object rawData,
-            int[] shape,
-            int instanceIndex
-    ) {
-
-        boolean isNCHW = hdf5Layout.equals("NCHW");
-
-        int height;
-        int width;
-        int channels;
-
-        if (isNCHW) {
-            channels = shape[1];
-            height = shape[2];
-            width = shape[3];
-        } else {
-            height = shape[1];
-            width = shape[2];
-            channels = shape[3];
-        }
-
-        int pixels = height * width;
-
-        if (isNumeric) {
-
-            if (hasMissingValues) {
-                Double[][] data = new Double[pixels][channels];
-
-                for (int h = 0; h < height; h++) {
-                    for (int w = 0; w < width; w++) {
-                        int pixelIndex = h * width + w;
-
-                        for (int c = 0; c < channels; c++) {
-                            Object value =
-                                    isNCHW
-                                            ? getValue(rawData, instanceIndex, c, h, w)
-                                            : getValue(rawData, instanceIndex, h, w, c);
-
-                            data[pixelIndex][c] = toBoxedDouble(value);
+                            result[pixel][channel] =
+                                    toBoxedDouble(
+                                            nchw
+                                                    ? getValue(
+                                                    rawData,
+                                                    instanceIndex,
+                                                    channel,
+                                                    heightIndex,
+                                                    widthIndex
+                                            )
+                                                    : getValue(
+                                                    rawData,
+                                                    instanceIndex,
+                                                    heightIndex,
+                                                    widthIndex,
+                                                    channel
+                                            )
+                                    );
                         }
                     }
                 }
 
-                return data;
+                return result;
             }
 
-            double[][] data = new double[pixels][channels];
+            double[][] result =
+                    new double[pixels][channels];
 
-            for (int h = 0; h < height; h++) {
-                for (int w = 0; w < width; w++) {
-                    int pixelIndex = h * width + w;
+            for (int heightIndex = 0;
+                 heightIndex < height;
+                 heightIndex++) {
 
-                    for (int c = 0; c < channels; c++) {
-                        Object value =
-                                isNCHW
-                                        ? getValue(rawData, instanceIndex, c, h, w)
-                                        : getValue(rawData, instanceIndex, h, w, c);
+                for (int widthIndex = 0;
+                     widthIndex < width;
+                     widthIndex++) {
 
-                        data[pixelIndex][c] = toPrimitiveDouble(value);
+                    int pixel =
+                            heightIndex * width
+                                    + widthIndex;
+
+                    for (int channel = 0;
+                         channel < channels;
+                         channel++) {
+
+                        result[pixel][channel] =
+                                toPrimitiveDouble(
+                                        nchw
+                                                ? getValue(
+                                                rawData,
+                                                instanceIndex,
+                                                channel,
+                                                heightIndex,
+                                                widthIndex
+                                        )
+                                                : getValue(
+                                                rawData,
+                                                instanceIndex,
+                                                heightIndex,
+                                                widthIndex,
+                                                channel
+                                        )
+                                );
                     }
                 }
             }
 
-            return data;
+            return result;
         }
 
-        Object[][] data = new Object[pixels][channels];
+        Object[][] result =
+                new Object[pixels][channels];
 
-        for (int h = 0; h < height; h++) {
-            for (int w = 0; w < width; w++) {
-                int pixelIndex = h * width + w;
+        for (int heightIndex = 0;
+             heightIndex < height;
+             heightIndex++) {
 
-                for (int c = 0; c < channels; c++) {
-                    Object value =
-                            isNCHW
-                                    ? getValue(rawData, instanceIndex, c, h, w)
-                                    : getValue(rawData, instanceIndex, h, w, c);
+            for (int widthIndex = 0;
+                 widthIndex < width;
+                 widthIndex++) {
 
-                    data[pixelIndex][c] = parseGenericValue(value);
+                int pixel =
+                        heightIndex * width
+                                + widthIndex;
+
+                for (int channel = 0;
+                     channel < channels;
+                     channel++) {
+
+                    result[pixel][channel] =
+                            parseGenericValue(
+                                    nchw
+                                            ? getValue(
+                                            rawData,
+                                            instanceIndex,
+                                            channel,
+                                            heightIndex,
+                                            widthIndex
+                                    )
+                                            : getValue(
+                                            rawData,
+                                            instanceIndex,
+                                            heightIndex,
+                                            widthIndex,
+                                            channel
+                                    )
+                            );
                 }
             }
         }
 
-        return data;
+        return result;
     }
+
+    /*
+     * ---------------------------------------------------------------------
+     * Labels
+     * ---------------------------------------------------------------------
+     */
 
     private Object buildLabel(
             Object rawLabels,
             int[] labelShape,
             int instanceIndex
     ) {
-
         if (rawLabels == null || labelShape == null) {
             return null;
         }
 
         if (labelShape.length == 1) {
             return parseLabelValue(
-                    getValue(rawLabels, instanceIndex)
+                    getRank1Value(
+                            rawLabels,
+                            instanceIndex
+                    )
             );
         }
 
-        if (labelShape.length == 2) {
-            int labelCount = labelShape[1];
+        int labelCount =
+                labelShape[1];
 
-            List<Object> labels = new ArrayList<>();
+        List<Object> labels =
+                new ArrayList<>(
+                        labelCount
+                );
 
-            for (int k = 0; k < labelCount; k++) {
+        /*
+         * Common primitive rank-2 label paths.
+         */
+        if (rawLabels instanceof int[][] values) {
+            for (int labelIndex = 0;
+                 labelIndex < labelCount;
+                 labelIndex++) {
+
                 labels.add(
-                        parseLabelValue(
-                                getValue(rawLabels, instanceIndex, k)
+                        values[instanceIndex][labelIndex]
+                );
+            }
+
+            return Collections.unmodifiableList(
+                    labels
+            );
+        }
+
+        if (rawLabels instanceof long[][] values) {
+            for (int labelIndex = 0;
+                 labelIndex < labelCount;
+                 labelIndex++) {
+
+                labels.add(
+                        normalizeIntegralLabel(
+                                values[instanceIndex][labelIndex]
                         )
                 );
             }
 
-            return labels;
+            return Collections.unmodifiableList(
+                    labels
+            );
         }
 
-        throw new IllegalArgumentException(
-                "Unsupported HDF5 label rank: " + labelShape.length
+        if (rawLabels instanceof double[][] values) {
+            for (int labelIndex = 0;
+                 labelIndex < labelCount;
+                 labelIndex++) {
+
+                labels.add(
+                        parseLabelValue(
+                                values[instanceIndex][labelIndex]
+                        )
+                );
+            }
+
+            return Collections.unmodifiableList(
+                    labels
+            );
+        }
+
+        for (int labelIndex = 0;
+             labelIndex < labelCount;
+             labelIndex++) {
+
+            labels.add(
+                    parseLabelValue(
+                            getValue(
+                                    rawLabels,
+                                    instanceIndex,
+                                    labelIndex
+                            )
+                    )
+            );
+        }
+
+        return Collections.unmodifiableList(
+                labels
         );
     }
 
-    private Object parseLabelValue(Object value) {
+    private Object getRank1Value(
+            Object rawLabels,
+            int instanceIndex
+    ) {
+        if (rawLabels instanceof int[] values) {
+            return values[instanceIndex];
+        }
 
-        Object normalized = normalizeValue(value);
+        if (rawLabels instanceof long[] values) {
+            return values[instanceIndex];
+        }
+
+        if (rawLabels instanceof double[] values) {
+            return values[instanceIndex];
+        }
+
+        if (rawLabels instanceof float[] values) {
+            return values[instanceIndex];
+        }
+
+        if (rawLabels instanceof short[] values) {
+            return values[instanceIndex];
+        }
+
+        if (rawLabels instanceof byte[] values) {
+            return values[instanceIndex];
+        }
+
+        if (rawLabels instanceof boolean[] values) {
+            return values[instanceIndex];
+        }
+
+        if (rawLabels instanceof Object[] values) {
+            return values[instanceIndex];
+        }
+
+        return Array.get(
+                rawLabels,
+                instanceIndex
+        );
+    }
+
+    private Object parseLabelValue(
+            Object value
+    ) {
+        Object normalized =
+                normalizeValue(
+                        value
+                );
 
         if (normalized == null) {
             return null;
         }
 
         if (isRegression) {
-            return toPrimitiveDouble(normalized);
+            return toPrimitiveDouble(
+                    normalized
+            );
         }
 
         if (normalized instanceof Integer) {
             return normalized;
         }
 
-        if (normalized instanceof Long) {
-            long longValue = (Long) normalized;
+        if (normalized instanceof Byte
+                || normalized instanceof Short) {
 
-            if (longValue >= Integer.MIN_VALUE
-                    && longValue <= Integer.MAX_VALUE) {
-                return (int) longValue;
-            }
-
-            return longValue;
+            return ((Number) normalized).intValue();
         }
 
-        if (normalized instanceof Number) {
-            double doubleValue = ((Number) normalized).doubleValue();
-
-            if (doubleValue == Math.rint(doubleValue)
-                    && doubleValue >= Integer.MIN_VALUE
-                    && doubleValue <= Integer.MAX_VALUE) {
-                return (int) doubleValue;
-            }
-
-            return doubleValue;
+        if (normalized instanceof Long longValue) {
+            return normalizeIntegralLabel(
+                    longValue
+            );
         }
 
-        String trimmed = normalized.toString().trim();
+        if (normalized instanceof Number number) {
+            double valueAsDouble =
+                    number.doubleValue();
 
-        if (MissingValueParser.isMissing(trimmed)) {
+            return normalizeNumericLabel(
+                    valueAsDouble
+            );
+        }
+
+        String token =
+                normalized.toString()
+                        .trim();
+
+        if (isMissingToken(token)) {
             return null;
         }
 
         try {
-            return Integer.parseInt(trimmed);
+            return Integer.parseInt(
+                    token
+            );
         } catch (NumberFormatException ignored) {
             try {
-                double parsed = Double.parseDouble(trimmed);
-
-                if (parsed == Math.rint(parsed)
-                        && parsed >= Integer.MIN_VALUE
-                        && parsed <= Integer.MAX_VALUE) {
-                    return (int) parsed;
-                }
-
-                return parsed;
+                return normalizeNumericLabel(
+                        JavaDoubleParser.parseDouble(
+                                token
+                        )
+                );
             } catch (NumberFormatException ignoredAgain) {
-                return trimmed;
+                return token;
             }
         }
     }
 
-    private static Object parseGenericValue(Object value) {
+    private static Object normalizeIntegralLabel(
+            long value
+    ) {
+        if (value >= Integer.MIN_VALUE
+                && value <= Integer.MAX_VALUE) {
 
-        Object normalized = normalizeValue(value);
-
-        if (normalized == null) {
-            return null;
-        }
-
-        if (normalized instanceof String) {
-            String trimmed = normalized.toString().trim();
-
-            if (MissingValueParser.isMissing(trimmed)) {
-                return null;
-            }
-
-            try {
-                return Double.parseDouble(trimmed);
-            } catch (NumberFormatException e1) {
-
-                if (trimmed.equalsIgnoreCase("true")
-                        || trimmed.equalsIgnoreCase("false")) {
-                    return Boolean.parseBoolean(trimmed);
-                }
-
-                return trimmed;
-            }
-        }
-
-        return normalized;
-    }
-
-    private static Double toBoxedDouble(Object value) {
-
-        Object normalized = normalizeValue(value);
-
-        if (normalized == null) {
-            return null;
-        }
-
-        if (normalized instanceof Number) {
-            return ((Number) normalized).doubleValue();
-        }
-
-        if (normalized instanceof Boolean) {
-            return ((Boolean) normalized) ? 1.0 : 0.0;
-        }
-
-        String trimmed = normalized.toString().trim();
-
-        if (MissingValueParser.isMissing(trimmed)) {
-            return null;
-        }
-
-        return Double.valueOf(trimmed);
-    }
-
-    private static double toPrimitiveDouble(Object value) {
-
-        Object normalized = normalizeValue(value);
-
-        if (normalized == null) {
-            throw new IllegalArgumentException(
-                    "Encountered null numeric value, but hasMissingValues=false."
-            );
-        }
-
-        if (normalized instanceof Number) {
-            return ((Number) normalized).doubleValue();
-        }
-
-        if (normalized instanceof Boolean) {
-            return ((Boolean) normalized) ? 1.0 : 0.0;
-        }
-
-        String trimmed = normalized.toString().trim();
-
-        if (MissingValueParser.isMissing(trimmed)) {
-            throw new IllegalArgumentException(
-                    "Encountered missing numeric value, but hasMissingValues=false."
-            );
-        }
-
-        return Double.parseDouble(trimmed);
-    }
-
-    /**
-     * Converts HDF5/JVM-specific scalar representations into ordinary
-     * Java objects where possible.
-     */
-    private static Object normalizeValue(Object value) {
-
-        if (value == null) {
-            return null;
-        }
-
-        if (value instanceof byte[]) {
-            byte[] bytes = (byte[]) value;
-
-            return new String(bytes, StandardCharsets.UTF_8).trim();
-        }
-
-        if (value instanceof Character) {
-            return value.toString();
+            return (int) value;
         }
 
         return value;
     }
 
-    /**
-     * Reflectively indexes into primitive or Object multi-dimensional arrays.
-     *
-     * This avoids having to special-case every possible primitive array type,
-     * such as double[][], float[][], int[][], etc.
-     */
-    private static Object getValue(Object array, int... indices) {
+    private static Object normalizeNumericLabel(
+            double value
+    ) {
+        if (value == Math.rint(value)
+                && value >= Integer.MIN_VALUE
+                && value <= Integer.MAX_VALUE) {
 
-        Object current = array;
+            return (int) value;
+        }
+
+        return value;
+    }
+
+    /*
+     * ---------------------------------------------------------------------
+     * Typed conversion helpers
+     * ---------------------------------------------------------------------
+     */
+
+    private static double[] toDoubleArray(
+            float[] source
+    ) {
+        double[] result =
+                new double[source.length];
+
+        for (int index = 0;
+             index < source.length;
+             index++) {
+
+            result[index] =
+                    source[index];
+        }
+
+        return result;
+    }
+
+    private static double[] toDoubleArray(
+            int[] source
+    ) {
+        double[] result =
+                new double[source.length];
+
+        for (int index = 0;
+             index < source.length;
+             index++) {
+
+            result[index] =
+                    source[index];
+        }
+
+        return result;
+    }
+
+    private static double[] toDoubleArray(
+            long[] source
+    ) {
+        double[] result =
+                new double[source.length];
+
+        for (int index = 0;
+             index < source.length;
+             index++) {
+
+            result[index] =
+                    source[index];
+        }
+
+        return result;
+    }
+
+    private static double[][] toDoubleMatrix(
+            float[][] source
+    ) {
+        double[][] result =
+                new double[source.length][];
+
+        for (int index = 0;
+             index < source.length;
+             index++) {
+
+            result[index] =
+                    toDoubleArray(
+                            source[index]
+                    );
+        }
+
+        return result;
+    }
+
+    private static double[][] toDoubleMatrix(
+            int[][] source
+    ) {
+        double[][] result =
+                new double[source.length][];
+
+        for (int index = 0;
+             index < source.length;
+             index++) {
+
+            result[index] =
+                    toDoubleArray(
+                            source[index]
+                    );
+        }
+
+        return result;
+    }
+
+    private static double[][] toDoubleMatrix(
+            long[][] source
+    ) {
+        double[][] result =
+                new double[source.length][];
+
+        for (int index = 0;
+             index < source.length;
+             index++) {
+
+            result[index] =
+                    toDoubleArray(
+                            source[index]
+                    );
+        }
+
+        return result;
+    }
+
+    private static double[][] transposeDouble(
+            double[][] source
+    ) {
+        if (source.length == 0) {
+            return new double[0][0];
+        }
+
+        int timeLength =
+                source.length;
+
+        int dimensionCount =
+                source[0].length;
+
+        double[][] result =
+                new double[dimensionCount][timeLength];
+
+        for (int time = 0;
+             time < timeLength;
+             time++) {
+
+            validateRowLength(
+                    source[time].length,
+                    dimensionCount,
+                    "double NTD"
+            );
+
+            for (int dimension = 0;
+                 dimension < dimensionCount;
+                 dimension++) {
+
+                result[dimension][time] =
+                        source[time][dimension];
+            }
+        }
+
+        return result;
+    }
+
+    private static double[][] transposeFloatToDouble(
+            float[][] source
+    ) {
+        if (source.length == 0) {
+            return new double[0][0];
+        }
+
+        int timeLength =
+                source.length;
+
+        int dimensionCount =
+                source[0].length;
+
+        double[][] result =
+                new double[dimensionCount][timeLength];
+
+        for (int time = 0;
+             time < timeLength;
+             time++) {
+
+            validateRowLength(
+                    source[time].length,
+                    dimensionCount,
+                    "float NTD"
+            );
+
+            for (int dimension = 0;
+                 dimension < dimensionCount;
+                 dimension++) {
+
+                result[dimension][time] =
+                        source[time][dimension];
+            }
+        }
+
+        return result;
+    }
+
+    private static double[][] transposeIntToDouble(
+            int[][] source
+    ) {
+        if (source.length == 0) {
+            return new double[0][0];
+        }
+
+        int timeLength =
+                source.length;
+
+        int dimensionCount =
+                source[0].length;
+
+        double[][] result =
+                new double[dimensionCount][timeLength];
+
+        for (int time = 0;
+             time < timeLength;
+             time++) {
+
+            validateRowLength(
+                    source[time].length,
+                    dimensionCount,
+                    "int NTD"
+            );
+
+            for (int dimension = 0;
+                 dimension < dimensionCount;
+                 dimension++) {
+
+                result[dimension][time] =
+                        source[time][dimension];
+            }
+        }
+
+        return result;
+    }
+
+    private static double[][] transposeLongToDouble(
+            long[][] source
+    ) {
+        if (source.length == 0) {
+            return new double[0][0];
+        }
+
+        int timeLength =
+                source.length;
+
+        int dimensionCount =
+                source[0].length;
+
+        double[][] result =
+                new double[dimensionCount][timeLength];
+
+        for (int time = 0;
+             time < timeLength;
+             time++) {
+
+            validateRowLength(
+                    source[time].length,
+                    dimensionCount,
+                    "long NTD"
+            );
+
+            for (int dimension = 0;
+                 dimension < dimensionCount;
+                 dimension++) {
+
+                result[dimension][time] =
+                        source[time][dimension];
+            }
+        }
+
+        return result;
+    }
+
+    private static double[][] flattenNhwcDouble(
+            double[][][] source
+    ) {
+        int height =
+                source.length;
+
+        int width =
+                height == 0
+                        ? 0
+                        : source[0].length;
+
+        int channels =
+                height == 0 || width == 0
+                        ? 0
+                        : source[0][0].length;
+
+        double[][] result =
+                new double[Math.multiplyExact(height, width)][channels];
+
+        for (int h = 0;
+             h < height;
+             h++) {
+
+            validateRowLength(
+                    source[h].length,
+                    width,
+                    "double NHWC height"
+            );
+
+            for (int w = 0;
+                 w < width;
+                 w++) {
+
+                validateRowLength(
+                        source[h][w].length,
+                        channels,
+                        "double NHWC channels"
+                );
+
+                System.arraycopy(
+                        source[h][w],
+                        0,
+                        result[h * width + w],
+                        0,
+                        channels
+                );
+            }
+        }
+
+        return result;
+    }
+
+    private static double[][] flattenNchwDouble(
+            double[][][] source
+    ) {
+        int channels =
+                source.length;
+
+        int height =
+                channels == 0
+                        ? 0
+                        : source[0].length;
+
+        int width =
+                channels == 0 || height == 0
+                        ? 0
+                        : source[0][0].length;
+
+        double[][] result =
+                new double[Math.multiplyExact(height, width)][channels];
+
+        for (int channel = 0;
+             channel < channels;
+             channel++) {
+
+            for (int h = 0;
+                 h < height;
+                 h++) {
+
+                for (int w = 0;
+                     w < width;
+                     w++) {
+
+                    result[h * width + w][channel] =
+                            source[channel][h][w];
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static double[][] flattenNhwcFloat(
+            float[][][] source
+    ) {
+        return flattenGenericNhwc(
+                source
+        );
+    }
+
+    private static double[][] flattenNchwFloat(
+            float[][][] source
+    ) {
+        return flattenGenericNchw(
+                source
+        );
+    }
+
+    private static double[][] flattenNhwcInt(
+            int[][][] source
+    ) {
+        return flattenGenericNhwc(
+                source
+        );
+    }
+
+    private static double[][] flattenNchwInt(
+            int[][][] source
+    ) {
+        return flattenGenericNchw(
+                source
+        );
+    }
+
+    private static double[][] flattenNhwcLong(
+            long[][][] source
+    ) {
+        return flattenGenericNhwc(
+                source
+        );
+    }
+
+    private static double[][] flattenNchwLong(
+            long[][][] source
+    ) {
+        return flattenGenericNchw(
+                source
+        );
+    }
+
+    private static double[][] flattenGenericNhwc(
+            Object source
+    ) {
+        int height =
+                Array.getLength(
+                        source
+                );
+
+        Object firstHeight =
+                height == 0
+                        ? null
+                        : Array.get(source, 0);
+
+        int width =
+                firstHeight == null
+                        ? 0
+                        : Array.getLength(firstHeight);
+
+        Object firstPixel =
+                width == 0
+                        ? null
+                        : Array.get(firstHeight, 0);
+
+        int channels =
+                firstPixel == null
+                        ? 0
+                        : Array.getLength(firstPixel);
+
+        double[][] result =
+                new double[Math.multiplyExact(height, width)][channels];
+
+        for (int h = 0;
+             h < height;
+             h++) {
+
+            Object row =
+                    Array.get(
+                            source,
+                            h
+                    );
+
+            for (int w = 0;
+                 w < width;
+                 w++) {
+
+                Object pixel =
+                        Array.get(
+                                row,
+                                w
+                        );
+
+                for (int channel = 0;
+                     channel < channels;
+                     channel++) {
+
+                    result[h * width + w][channel] =
+                            ((Number) Array.get(
+                                    pixel,
+                                    channel
+                            )).doubleValue();
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static double[][] flattenGenericNchw(
+            Object source
+    ) {
+        int channels =
+                Array.getLength(
+                        source
+                );
+
+        Object firstChannel =
+                channels == 0
+                        ? null
+                        : Array.get(source, 0);
+
+        int height =
+                firstChannel == null
+                        ? 0
+                        : Array.getLength(firstChannel);
+
+        Object firstRow =
+                height == 0
+                        ? null
+                        : Array.get(firstChannel, 0);
+
+        int width =
+                firstRow == null
+                        ? 0
+                        : Array.getLength(firstRow);
+
+        double[][] result =
+                new double[Math.multiplyExact(height, width)][channels];
+
+        for (int channel = 0;
+             channel < channels;
+             channel++) {
+
+            Object channelData =
+                    Array.get(
+                            source,
+                            channel
+                    );
+
+            for (int h = 0;
+                 h < height;
+                 h++) {
+
+                Object row =
+                        Array.get(
+                                channelData,
+                                h
+                        );
+
+                for (int w = 0;
+                     w < width;
+                     w++) {
+
+                    result[h * width + w][channel] =
+                            ((Number) Array.get(
+                                    row,
+                                    w
+                            )).doubleValue();
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static Double[] boxDoubles(
+            double[] source
+    ) {
+        Double[] result =
+                new Double[source.length];
+
+        for (int index = 0;
+             index < source.length;
+             index++) {
+
+            result[index] =
+                    source[index];
+        }
+
+        return result;
+    }
+
+    private static Object[] boxAsObjects(
+            double[] source
+    ) {
+        Object[] result =
+                new Object[source.length];
+
+        for (int index = 0;
+             index < source.length;
+             index++) {
+
+            result[index] =
+                    source[index];
+        }
+
+        return result;
+    }
+
+    private static void validateRowLength(
+            int actual,
+            int expected,
+            String role
+    ) {
+        if (actual != expected) {
+            throw new IllegalArgumentException(
+                    "Inconsistent "
+                            + role
+                            + " array length. Expected "
+                            + expected
+                            + " but found "
+                            + actual
+                            + "."
+            );
+        }
+    }
+
+    /*
+     * ---------------------------------------------------------------------
+     * Generic conversions
+     * ---------------------------------------------------------------------
+     */
+
+    private Object parseGenericValue(
+            Object value
+    ) {
+        Object normalized =
+                normalizeValue(
+                        value
+                );
+
+        if (normalized == null) {
+            return null;
+        }
+
+        if (!(normalized instanceof CharSequence)) {
+            return normalized;
+        }
+
+        String token =
+                normalized.toString()
+                        .trim();
+
+        if (isMissingToken(token)) {
+            return null;
+        }
+
+        try {
+            return JavaDoubleParser.parseDouble(
+                    token
+            );
+        } catch (NumberFormatException ignored) {
+            if (token.equalsIgnoreCase("true")
+                    || token.equalsIgnoreCase("false")) {
+
+                return Boolean.parseBoolean(
+                        token
+                );
+            }
+
+            return token;
+        }
+    }
+
+    private Double toBoxedDouble(
+            Object value
+    ) {
+        Object normalized =
+                normalizeValue(
+                        value
+                );
+
+        if (normalized == null) {
+            return null;
+        }
+
+        if (normalized instanceof Number number) {
+            return number.doubleValue();
+        }
+
+        if (normalized instanceof Boolean booleanValue) {
+            return booleanValue
+                    ? 1.0
+                    : 0.0;
+        }
+
+        String token =
+                normalized.toString()
+                        .trim();
+
+        if (isMissingToken(token)) {
+            return null;
+        }
+
+        return JavaDoubleParser.parseDouble(
+                token
+        );
+    }
+
+    private double toPrimitiveDouble(
+            Object value
+    ) {
+        Object normalized =
+                normalizeValue(
+                        value
+                );
+
+        if (normalized == null) {
+            throw new IllegalArgumentException(
+                    "Encountered null numeric value, but "
+                            + "hasMissingValues=false."
+            );
+        }
+
+        if (normalized instanceof Number number) {
+            return number.doubleValue();
+        }
+
+        if (normalized instanceof Boolean booleanValue) {
+            return booleanValue
+                    ? 1.0
+                    : 0.0;
+        }
+
+        String token =
+                normalized.toString()
+                        .trim();
+
+        if (isMissingToken(token)) {
+            throw new IllegalArgumentException(
+                    "Encountered missing numeric value, but "
+                            + "hasMissingValues=false."
+            );
+        }
+
+        return JavaDoubleParser.parseDouble(
+                token
+        );
+    }
+
+    private static Object normalizeValue(
+            Object value
+    ) {
+        if (value == null) {
+            return null;
+        }
+
+        if (value instanceof byte[] bytes) {
+            return new String(
+                    bytes,
+                    StandardCharsets.UTF_8
+            ).trim();
+        }
+
+        if (value instanceof Character character) {
+            return character.toString();
+        }
+
+        return value;
+    }
+
+    private boolean isMissingToken(
+            String token
+    ) {
+        if (token == null) {
+            return true;
+        }
+
+        String trimmed =
+                token.trim();
+
+        if (trimmed.isEmpty()) {
+            return true;
+        }
+
+        return missingIndicators.contains(
+                trimmed.toUpperCase(
+                        Locale.ROOT
+                )
+        );
+    }
+
+    private static Object getValue(
+            Object array,
+            int... indices
+    ) {
+        Object current =
+                array;
 
         for (int index : indices) {
-            current = Array.get(current, index);
+            current =
+                    Array.get(
+                            current,
+                            index
+                    );
         }
 
         return current;
     }
 
-    private void validateOptions() {
+    /*
+     * ---------------------------------------------------------------------
+     * Metadata and validation
+     * ---------------------------------------------------------------------
+     */
 
-        if (dataFileName == null || dataFileName.trim().isEmpty()) {
+    private static ReaderOptions requireOptions(
+            ReaderOptions options
+    ) {
+        if (options == null) {
             throw new IllegalArgumentException(
-                    "HDF5Reader requires dataFileName."
+                    "HDF5Reader requires non-null ReaderOptions."
             );
         }
 
-        if (hdf5DatasetPath == null || hdf5DatasetPath.trim().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "HDF5Reader requires hdf5DatasetPath."
-            );
-        }
-
-        validateLayout();
+        return options;
     }
 
-    private void validateLayout() {
-
-        String layout = hdf5Layout;
-
-        if (layout.equals("AUTO")
-                || layout.equals("NT")
-                || layout.equals("NDT")
-                || layout.equals("NTD")
-                || layout.equals("NHWC")
-                || layout.equals("NCHW")) {
-            return;
+    private static String requireNonblank(
+            String value,
+            String argumentName
+    ) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(
+                    "HDF5Reader requires "
+                            + argumentName
+                            + "."
+            );
         }
 
-        throw new IllegalArgumentException(
-                "Unsupported hdf5Layout: "
-                        + hdf5Layout
-                        + ". Use AUTO, NT, NDT, NTD, NHWC, or NCHW."
-        );
+        return value.trim();
+    }
+
+    private static String normalizeNullableString(
+            String value
+    ) {
+        if (value == null) {
+            return null;
+        }
+
+        String trimmed =
+                value.trim();
+
+        if (trimmed.isEmpty()
+                || trimmed.equalsIgnoreCase("None")) {
+
+            return null;
+        }
+
+        return trimmed;
+    }
+
+    private static Hdf5Layout parseLayout(
+            String value
+    ) {
+        String normalized =
+                normalizeNullableString(
+                        value
+                );
+
+        if (normalized == null) {
+            return DEFAULT_LAYOUT;
+        }
+
+        try {
+            return Hdf5Layout.valueOf(
+                    normalized.toUpperCase(
+                            Locale.ROOT
+                    )
+            );
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "Unsupported hdf5Layout: "
+                            + value
+                            + ". Use AUTO, NT, NDT, NTD, NHWC, or NCHW.",
+                    e
+            );
+        }
+    }
+
+    private Path validateFile()
+            throws IOException {
+
+        Path file =
+                Path.of(
+                        dataFileName
+                );
+
+        if (!Files.exists(file)) {
+            throw new IOException(
+                    "HDF5 data file does not exist: "
+                            + file
+            );
+        }
+
+        if (!Files.isRegularFile(file)) {
+            throw new IOException(
+                    "HDF5 data path is not a regular file: "
+                            + file
+            );
+        }
+
+        if (!Files.isReadable(file)) {
+            throw new IOException(
+                    "HDF5 data file is not readable: "
+                            + file
+            );
+        }
+
+        return file;
+    }
+
+    private static Dataset requireDataset(
+            HdfFile hdfFile,
+            String datasetPath,
+            String role
+    ) {
+        Dataset dataset =
+                hdfFile.getDatasetByPath(
+                        datasetPath
+                );
+
+        if (dataset == null) {
+            throw new IllegalArgumentException(
+                    "HDF5 "
+                            + role
+                            + " dataset not found: "
+                            + datasetPath
+            );
+        }
+
+        return dataset;
+    }
+
+    private static void validateDataShape(
+            int[] shape
+    ) {
+        if (shape.length < 2 || shape.length > 4) {
+            throw new IllegalArgumentException(
+                    "HDF5Reader supports data ranks 2, 3, and 4. "
+                            + "Found rank "
+                            + shape.length
+                            + "."
+            );
+        }
+
+        for (int dimension = 0;
+             dimension < shape.length;
+             dimension++) {
+
+            if (shape[dimension] < 0) {
+                throw new IllegalArgumentException(
+                        "Negative HDF5 dimension at index "
+                                + dimension
+                                + ": "
+                                + shape[dimension]
+                );
+            }
+        }
+    }
+
+    private Hdf5Layout resolveEffectiveLayout(
+            int rank
+    ) {
+        if (hdf5Layout != Hdf5Layout.AUTO) {
+            return hdf5Layout;
+        }
+
+        return switch (rank) {
+            case 2 -> Hdf5Layout.NT;
+            case 3 -> Hdf5Layout.NDT;
+            case 4 -> Hdf5Layout.NHWC;
+            default -> throw new IllegalArgumentException(
+                    "Cannot resolve AUTO layout for HDF5 rank "
+                            + rank
+                            + "."
+            );
+        };
+    }
+
+    private static void validateLayoutForRank(
+            Hdf5Layout layout,
+            int rank
+    ) {
+        boolean valid =
+                switch (rank) {
+                    case 2 ->
+                            layout == Hdf5Layout.NT;
+
+                    case 3 ->
+                            layout == Hdf5Layout.NDT
+                                    || layout == Hdf5Layout.NTD;
+
+                    case 4 ->
+                            layout == Hdf5Layout.NHWC
+                                    || layout == Hdf5Layout.NCHW;
+
+                    default ->
+                            false;
+                };
+
+        if (!valid) {
+            throw new IllegalArgumentException(
+                    "HDF5 layout "
+                            + layout
+                            + " is incompatible with dataset rank "
+                            + rank
+                            + "."
+            );
+        }
     }
 
     private static void validateLabelShape(
             int[] labelShape,
-            int nInstances
+            int instanceCount
     ) {
+        if (labelShape.length != 1
+                && labelShape.length != 2) {
 
-        if (labelShape.length != 1 && labelShape.length != 2) {
             throw new IllegalArgumentException(
-                    "HDF5Reader supports label ranks 1 and 2. Found rank "
+                    "HDF5Reader supports label ranks 1 and 2. "
+                            + "Found rank "
                             + labelShape.length
+                            + "."
             );
         }
 
-        if (labelShape[0] != nInstances) {
+        if (labelShape[0] != instanceCount) {
             throw new IllegalArgumentException(
                     "Label dataset first dimension does not match data. "
-                            + "Data instances: "
-                            + nInstances
-                            + ", label instances: "
+                            + "Data instances="
+                            + instanceCount
+                            + ", label instances="
                             + labelShape[0]
+                            + "."
             );
         }
     }
 
-    private static int[] toIntShape(long[] dimensions) {
+    private static int calculateCommonLength(
+            int[] shape,
+            Hdf5Layout layout
+    ) {
+        return switch (shape.length) {
+            case 2 ->
+                    shape[1];
 
-        int[] shape = new int[dimensions.length];
+            case 3 ->
+                    layout == Hdf5Layout.NTD
+                            ? shape[1]
+                            : shape[2];
 
-        for (int i = 0; i < dimensions.length; i++) {
-            if (dimensions[i] > Integer.MAX_VALUE) {
-                throw new IllegalArgumentException(
-                        "HDF5 dimension too large for Java int indexing: "
-                                + dimensions[i]
+            case 4 -> {
+                int height =
+                        layout == Hdf5Layout.NCHW
+                                ? shape[2]
+                                : shape[1];
+
+                int width =
+                        layout == Hdf5Layout.NCHW
+                                ? shape[3]
+                                : shape[2];
+
+                yield Math.multiplyExact(
+                        height,
+                        width
                 );
             }
 
-            shape[i] = (int) dimensions[i];
-        }
-
-        return shape;
+            default ->
+                    0;
+        };
     }
 
-    private static int[] toIntShape(int[] dimensions) {
+    private static int[] toIntShape(
+            long[] dimensions
+    ) {
+        int[] result =
+                new int[dimensions.length];
 
-        int[] shape = new int[dimensions.length];
+        for (int index = 0;
+             index < dimensions.length;
+             index++) {
 
-        System.arraycopy(dimensions, 0, shape, 0, dimensions.length);
+            if (dimensions[index] > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException(
+                        "HDF5 dimension is too large for Java array "
+                                + "indexing: "
+                                + dimensions[index]
+                );
+            }
 
-        return shape;
+            result[index] =
+                    Math.toIntExact(
+                            dimensions[index]
+                    );
+        }
+
+        return result;
     }
 
-    private static void updateGlobalLength(Object data) {
-
-        if (data instanceof double[]) {
-            AppContext.length = ((double[]) data).length;
-
-        } else if (data instanceof Double[]) {
-            AppContext.length = ((Double[]) data).length;
-
-        } else if (data instanceof double[][]) {
-            double[][] matrix = (double[][]) data;
-
-            if (matrix.length > 0) {
-                AppContext.length = matrix[0].length;
-            }
-
-        } else if (data instanceof Double[][]) {
-            Double[][] matrix = (Double[][]) data;
-
-            if (matrix.length > 0) {
-                AppContext.length = matrix[0].length;
-            }
-
-        } else if (data instanceof Object[][]) {
-            Object[][] matrix = (Object[][]) data;
-
-            if (matrix.length > 0) {
-                AppContext.length = matrix[0].length;
-            }
-
-        } else if (data instanceof Object[]) {
-            AppContext.length = ((Object[]) data).length;
-        }
+    private static int[] toIntShape(
+            int[] dimensions
+    ) {
+        return dimensions.clone();
     }
 
-    private static class MissingValueParser {
+    private static Set<String> snapshotMissingIndicators() {
+        if (AppContext.MissingStrings == null
+                || AppContext.MissingStrings.isEmpty()) {
 
-        private static Set<String> missingIndicators =
-                AppContext.MissingStrings;
-
-        public static void setMissingIndicators(Set<String> indicators) {
-            missingIndicators =
-                    indicators.stream()
-                            .map(String::toUpperCase)
-                            .collect(Collectors.toSet());
+            return Set.of();
         }
 
-        public static boolean isMissing(String token) {
+        Set<String> result =
+                new HashSet<>();
 
-            if (token == null) {
-                return true;
+        for (String indicator : AppContext.MissingStrings) {
+            if (indicator == null) {
+                continue;
             }
 
-            return missingIndicators.contains(token.trim().toUpperCase());
+            String normalized =
+                    indicator.trim();
+
+            if (!normalized.isEmpty()) {
+                result.add(
+                        normalized.toUpperCase(
+                                Locale.ROOT
+                        )
+                );
+            }
         }
+
+        if (result.isEmpty()) {
+            return Set.of();
+        }
+
+        return Collections.unmodifiableSet(
+                result
+        );
     }
 
     public static class ProgressLogger {
 
-        public static void logProgress(int i) {
-
-            if (i % 1000 == 0) {
-
-                if (i % 100000 == 0) {
-                    System.out.print("\n");
-
-                    if (i % 1000000 == 0) {
-                        long usedMem =
-                                AppContext.runtime.totalMemory()
-                                        - AppContext.runtime.freeMemory();
-
-                        System.out.print(i + ":" + usedMem / 1024 / 1024 + "mb\n");
-                    }
-
-                } else {
-                    System.out.print(".");
-                }
+        public static void logProgress(
+                int index
+        ) {
+            if (index % 1000 != 0) {
+                return;
             }
+
+            if (index % 100000 == 0) {
+                System.out.print("\n");
+
+                if (index % 1000000 == 0) {
+                    long usedMemory =
+                            AppContext.runtime.totalMemory()
+                                    - AppContext.runtime.freeMemory();
+
+                    System.out.print(
+                            index
+                                    + ":"
+                                    + usedMemory / 1024 / 1024
+                                    + "mb\n"
+                    );
+                }
+
+                return;
+            }
+
+            System.out.print(".");
         }
 
-        public static void logDuration(long start, long end) {
+        public static void logDuration(
+                long start,
+                long end
+        ) {
+            long elapsed =
+                    end - start;
 
-            long elapsed = end - start;
-
-            String timeDuration =
+            String duration =
                     DurationFormatUtils.formatDuration(
                             (long) (elapsed / 1e6),
                             "H:m:s.SSS"
                     );
 
-            System.out.println("finished in " + timeDuration);
+            System.out.println(
+                    "finished in "
+                            + duration
+            );
         }
     }
 }

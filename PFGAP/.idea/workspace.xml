@@ -7,13 +7,12 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/../Application/PFGAP.jar" beforeDir="false" afterPath="$PROJECT_DIR$/../Application/PFGAP.jar" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/artifacts/PFGAP_jar.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/artifacts/PFGAP_jar.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/deps/csv-deps-pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/deps/csv-deps-pom.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/datasets/readers/DatasetReaderFactory.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/DatasetReaderFactory.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/DelimitedFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/DelimitedFileReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedSeriesReader.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/HDF5Reader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/HDF5Reader.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/LongFormatReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/LongFormatReader.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/PerFileParquetSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/PerFileParquetSeriesReader.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/ReaderOptions.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/ReaderOptions.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/datasets/readers/ReaderType.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/ReaderType.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderFactory.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderFactory.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderSpec.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderSpec.java" afterDir="false" />
@@ -26,8 +25,8 @@
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
-        <option value="Interface" />
         <option value="Enum" />
+        <option value="Interface" />
         <option value="Class" />
       </list>
     </option>

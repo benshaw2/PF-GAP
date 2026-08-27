@@ -1,8 +1,6 @@
 package datasets.readers;
 
-import datasets.readers.lazy.LazyPerFileDelimitedReader;
-import datasets.readers.lazy.LazyPerFileNumericDelimitedReader;
-import datasets.readers.lazy.LazyPerFileParquetReader;
+import datasets.readers.lazy.*;
 
 import java.util.Objects;
 
@@ -85,6 +83,24 @@ public final class DatasetReaderFactory {
 
             case PER_FILE_NUMERIC_DELIMITED:
                 return new NumericPerFileDelimitedReader(options);
+
+            case NUMERIC_LONG_FORMAT:
+                new NumericLongFormatReader(options);
+
+            case PER_FILE_NUMERIC_PARQUET:
+                new NumericPerFileParquetReader(options);
+
+            case LAZY_PER_FILE_NUMERIC_PARQUET:
+                new LazyPerFileNumericParquetReader(options);
+
+            case PARQUET_COLUMN_FILE_READER:
+                new ParquetColumnSeriesReader(options);
+
+            case PER_FILE_CUSTOM:
+                new CustomPerFileReader(options);
+
+            case LAZY_PER_FILE_CUSTOM:
+                new LazyCustomPerFileReader(options);
 
             default:
                 throw new IllegalArgumentException(

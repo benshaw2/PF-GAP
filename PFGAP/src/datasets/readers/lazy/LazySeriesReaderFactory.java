@@ -1,9 +1,11 @@
 package datasets.readers.lazy;
 
-import datasets.readers.NumericPerFileDelimitedSeriesReader;
-import datasets.readers.PerFileDelimitedSeriesReader;
-import datasets.readers.PerFileParquetSeriesReader;
-import datasets.readers.ReaderType;
+import datasets.readers.*;
+import datasets.readers.api.CustomReaderContext;
+import datasets.readers.interop.JavaSeriesReader;
+
+import java.io.IOException;
+import java.nio.file.Path;
 
 public final class LazySeriesReaderFactory {
 
@@ -52,6 +54,62 @@ public final class LazySeriesReaderFactory {
                             spec.getStandardizationStats(),
                             spec.getInitialTimeCapacity()
                     );
+
+            case LAZY_PER_FILE_NUMERIC_PARQUET ->
+                    new NumericPerFileParquetSeriesReader(
+                            spec.getTimeColumn(),
+                            spec.getFeatureColumns(),
+                            spec.hasMissingValues(),
+                            spec.getStandardizationStats(),
+                            spec.getInitialTimeCapacity(),
+                            NumericPerFileParquetSeriesReader
+                                    .TimeOrderPolicy
+                                    .FILE_ORDER
+                    );
+
+            case LAZY_PER_FILE_CUSTOM -> {
+                String descriptor =
+                        spec.getCustomReaderDescriptor();
+
+                if (descriptor == null || descriptor.isBlank()) {
+                    throw new IllegalArgumentException(
+                            "LAZY_PER_FILE_CUSTOM requires a custom reader "
+                                    + "descriptor."
+                    );
+                }
+
+                Path dataPath =
+                        spec.getCustomReaderDataPath() == null
+                                ? null
+                                : Path.of(
+                                spec.getCustomReaderDataPath()
+                        );
+
+                CustomReaderContext context =
+                        new CustomReaderContext(
+                                dataPath,
+                                spec.isCustomReaderTest(),
+                                spec.isCustomReaderRegression(),
+                                spec.isNumeric(),
+                                spec.hasMissingValues(),
+                                spec.getCustomReaderParameters()
+                        );
+
+                try {
+                    yield new JavaSeriesReader(
+                            descriptor,
+                            context,
+                            spec.isCustomReaderThreadSafe()
+                    );
+                } catch (IOException | ReflectiveOperationException e) {
+                    throw new IllegalStateException(
+                            "Could not reconstruct custom lazy series reader from "
+                                    + "descriptor: "
+                                    + descriptor,
+                            e
+                    );
+                }
+            }
 
             default ->
                     throw new UnsupportedOperationException(

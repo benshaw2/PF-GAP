@@ -2,10 +2,7 @@ package datasets.readers;
 
 import preprocessing.standardization.StandardizationStats;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * Configuration object used by DatasetReaderFactory to construct
@@ -112,6 +109,34 @@ public class ReaderOptions {
     private String hdf5DatasetPath;
     private String hdf5LabelDatasetPath;
     private StandardizationStats standardizationStats;
+
+    /*
+     * User-defined Java reader options.
+     *
+     * customReaderDescriptor:
+     *      Identifies the plugin JAR and implementation class.
+     *
+     *      Expected format:
+     *
+     *          javareader:/path/to/readers.jar:my.package.MyReader
+     *
+     * customReaderParameters:
+     *      Arbitrary format-specific parameters supplied to the custom
+     *      reader through CustomReaderContext.
+     *
+     * customReaderThreadSafe:
+     *      If true, PFGAP may invoke the custom reader concurrently.
+     *      If false, plugin invocations are synchronized.
+     *
+     * The safe default is false.
+     */
+    private String customReaderDescriptor;
+
+    private Map<String, String> customReaderParameters =
+            new LinkedHashMap<>();
+
+    private boolean customReaderThreadSafe =
+            false;
 
     public ReaderOptions() {
     }
@@ -322,6 +347,136 @@ public class ReaderOptions {
         return this;
     }
 
+    /**
+     * Returns the descriptor used to load a user-defined Java reader.
+     *
+     * <p>Expected format:</p>
+     *
+     * <pre>
+     * javareader:/path/to/readers.jar:my.package.MyReader
+     * </pre>
+     */
+    public String getCustomReaderDescriptor() {
+        return customReaderDescriptor;
+    }
+
+    public ReaderOptions setCustomReaderDescriptor(
+            String customReaderDescriptor
+    ) {
+        this.customReaderDescriptor =
+                normalizeNullableString(
+                        customReaderDescriptor
+                );
+
+        return this;
+    }
+
+    /**
+     * Returns an unmodifiable view of the custom-reader parameters.
+     *
+     * <p>The map may be empty but is never null.</p>
+     */
+    public Map<String, String> getCustomReaderParameters() {
+        return Collections.unmodifiableMap(
+                customReaderParameters
+        );
+    }
+
+    /**
+     * Replaces the custom-reader parameter map.
+     *
+     * <p>Both keys and values are copied so subsequent structural changes to
+     * the caller's map do not alter these options.</p>
+     */
+    public ReaderOptions setCustomReaderParameters(
+            Map<String, String> customReaderParameters
+    ) {
+        this.customReaderParameters =
+                copyStringMap(
+                        customReaderParameters
+                );
+
+        return this;
+    }
+
+    /**
+     * Adds or replaces one custom-reader parameter.
+     */
+    public ReaderOptions setCustomReaderParameter(
+            String name,
+            String value
+    ) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Custom-reader parameter name cannot be null or blank."
+            );
+        }
+
+        customReaderParameters.put(
+                name.trim(),
+                value
+        );
+
+        return this;
+    }
+
+    /**
+     * Removes one custom-reader parameter.
+     */
+    public ReaderOptions removeCustomReaderParameter(
+            String name
+    ) {
+        if (name == null || name.isBlank()) {
+            return this;
+        }
+
+        customReaderParameters.remove(
+                name.trim()
+        );
+
+        return this;
+    }
+
+    /**
+     * Removes all custom-reader parameters.
+     */
+    public ReaderOptions clearCustomReaderParameters() {
+        customReaderParameters.clear();
+
+        return this;
+    }
+
+    /**
+     * Returns whether the user-defined reader may be invoked concurrently.
+     *
+     * <p>The default is false, which causes JavaSeriesReader to synchronize
+     * plugin calls.</p>
+     */
+    public boolean isCustomReaderThreadSafe() {
+        return customReaderThreadSafe;
+    }
+
+    public ReaderOptions setCustomReaderThreadSafe(
+            boolean customReaderThreadSafe
+    ) {
+        this.customReaderThreadSafe =
+                customReaderThreadSafe;
+
+        return this;
+    }
+
+    public String getCustomReaderParameter(
+            String name
+    ) {
+        if (name == null) {
+            return null;
+        }
+
+        return customReaderParameters.get(
+                name.trim()
+        );
+    }
+
     public StandardizationStats getStandardizationStats() {
         return standardizationStats;
     }
@@ -336,10 +491,10 @@ public class ReaderOptions {
     }
 
     /**
-     * Returns a shallow copy of these options.
+     * Returns a defensive copy of these options.
      *
-     * This is useful for train/test settings where most reader options are the
-     * same but paths and isTest differ.
+     * <p>This is useful for train/test settings where most reader options are
+     * the same but paths and isTest differ.</p>
      */
     public ReaderOptions copy() {
         return new ReaderOptions()
@@ -363,14 +518,78 @@ public class ReaderOptions {
                 .setRecursive(recursive)
                 .setInnerReaderType(innerReaderType)
                 .setHdf5DatasetPath(hdf5DatasetPath)
-                .setHdf5LabelDatasetPath(hdf5LabelDatasetPath);
+                .setHdf5LabelDatasetPath(hdf5LabelDatasetPath)
+                .setCustomReaderDescriptor(customReaderDescriptor)
+                .setCustomReaderParameters(customReaderParameters)
+                .setCustomReaderThreadSafe(customReaderThreadSafe)
+                .setStandardizationStats(standardizationStats);
     }
 
-    private static List<String> copyStringList(List<String> values) {
+    private static List<String> copyStringList(
+            List<String> values
+    ) {
         if (values == null) {
             return new ArrayList<>();
         }
 
-        return new ArrayList<>(values);
+        return new ArrayList<>(
+                values
+        );
+    }
+
+    private static Map<String, String> copyStringMap(
+            Map<String, String> values
+    ) {
+        if (values == null || values.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+
+        Map<String, String> copy =
+                new LinkedHashMap<>(
+                        Math.max(
+                                16,
+                                values.size() * 2
+                        )
+                );
+
+        for (Map.Entry<String, String> entry
+                : values.entrySet()) {
+
+            String name =
+                    entry.getKey();
+
+            if (name == null || name.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Custom-reader parameter names cannot be null "
+                                + "or blank."
+                );
+            }
+
+            copy.put(
+                    name.trim(),
+                    entry.getValue()
+            );
+        }
+
+        return copy;
+    }
+
+    private static String normalizeNullableString(
+            String value
+    ) {
+        if (value == null) {
+            return null;
+        }
+
+        String trimmed =
+                value.trim();
+
+        if (trimmed.isEmpty()
+                || trimmed.equalsIgnoreCase("None")) {
+
+            return null;
+        }
+
+        return trimmed;
     }
 }
