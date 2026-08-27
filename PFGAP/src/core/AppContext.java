@@ -141,6 +141,8 @@ public class AppContext {
 	public static boolean parallelTrees = false; //false;
 	public static boolean parallelProx = false; //false;
 	public static boolean parallelPredict = false; // if parallelTrees=true, predictions will be made in parallel across trees.
+	public static boolean parallel_split_assignments = false; // not currently compatible with parallelTrees
+	public static int parallel_split_assignment_threshold = 128;
 	// parallelPredict refers to parallelization across data instances (will not happen if parallelTrees=true).
 	public static int max_depth; //initializes to 0.
 	public static boolean impute_train = false;

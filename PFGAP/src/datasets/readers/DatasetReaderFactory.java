@@ -85,22 +85,22 @@ public final class DatasetReaderFactory {
                 return new NumericPerFileDelimitedReader(options);
 
             case NUMERIC_LONG_FORMAT:
-                new NumericLongFormatReader(options);
+                return new NumericLongFormatReader(options);
 
             case PER_FILE_NUMERIC_PARQUET:
-                new NumericPerFileParquetReader(options);
+                return new NumericPerFileParquetReader(options);
 
             case LAZY_PER_FILE_NUMERIC_PARQUET:
-                new LazyPerFileNumericParquetReader(options);
+                return new LazyPerFileNumericParquetReader(options);
 
             case PARQUET_COLUMN_FILE_READER:
-                new ParquetColumnSeriesReader(options);
+                return new ParquetColumnSeriesReader(options);
 
             case PER_FILE_CUSTOM:
-                new CustomPerFileReader(options);
+                return new CustomPerFileReader(options);
 
             case LAZY_PER_FILE_CUSTOM:
-                new LazyCustomPerFileReader(options);
+                return new LazyCustomPerFileReader(options);
 
             default:
                 throw new IllegalArgumentException(

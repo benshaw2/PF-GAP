@@ -501,6 +501,12 @@ public class PFApplication {
 				case "-parallelPredict":
 					AppContext.parallelPredict = Boolean.parseBoolean(options[1]);
 					break;
+				case "-parallelSplit":
+					AppContext.parallel_split_assignments = Boolean.parseBoolean(options[1]);
+					break;
+				case "-parallelSplitThreshold":
+					AppContext.parallel_split_assignment_threshold = Integer.parseInt(options[1]);
+					break;
 				case "-knn_distances":
 					//String[] distanceNames = options[1].split(",");
 					/*MEASURE[] measures = Arrays.stream(distanceNames)

@@ -132,6 +132,8 @@ def train(
     parallel_trees=False,
     parallel_predict=False,
     parallel_prox=False,
+    parallel_split_assignments=False,
+    parallel_split_assignment_threshold=128,
 
     # Missing/imputation controls
     has_missing_values=None,
@@ -264,6 +266,8 @@ def train(
         "-parallelTrees=" + _bool(parallel_trees),
         "-parallelProx=" + _bool(parallel_prox),
         "-parallelPredict=" + _bool(parallel_predict),
+        "-parallelSplit=" + _bool(parallel_split_assignments),
+        "-parallelSplitThreshold=" + str(parallel_split_assignment_threshold),
 
         "-hasMissingValues=" + _bool(has_missing_values),
         "-perform_train_imputation=" + _bool(impute_training_data),

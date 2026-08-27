@@ -39,7 +39,7 @@ public class ListObjectDataset implements ObjectDataset, Serializable {
         this.data = new ArrayList<>(expectedSize);
         this.labels = new ArrayList<>(expectedSize);
         this.classMap = new LinkedHashMap<>();
-        this.indices = new ArrayList<>();
+        this.indices = new ArrayList<>(expectedSize);
     }
 
     /*public ListObjectDataset(int expectedSize, int length) {

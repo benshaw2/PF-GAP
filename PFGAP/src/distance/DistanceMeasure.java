@@ -2,9 +2,11 @@ package distance;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.List;
+//import java.util.ArrayList;
+//import java.util.List;
 import java.util.Random;
+//import java.util.Arrays;
+import java.util.Objects;
 
 import core.AppContext;
 import datasets.readers.lazy.LazySeriesRef;
@@ -21,6 +23,15 @@ import distance.multiTS.*;
 public class DistanceMeasure implements Serializable {
 	
 	public final MEASURE distance_measure;
+	private final String[] descriptors;
+
+	public String[] getDescriptors() {
+		return descriptors.clone();
+	}
+
+	public boolean hasDescriptors() {
+		return descriptors.length > 0;
+	}
 
 	private Euclidean euc;
 	private DTW dtw;
@@ -97,9 +108,30 @@ public class DistanceMeasure implements Serializable {
 			weightWDTW,
 			weightWDDTW;
 
-	public DistanceMeasure (MEASURE m, String... descriptor) throws Exception{
-		this.distance_measure = m;
-		initialize(m, descriptor);
+	//public DistanceMeasure (MEASURE m, String... descriptor) throws Exception{
+		//this.distance_measure = m;
+		//initialize(m, descriptor);
+	//}
+
+	public DistanceMeasure(
+			MEASURE measure,
+			String... descriptor
+	) throws Exception {
+		this.distance_measure =
+				Objects.requireNonNull(
+						measure,
+						"DistanceMeasure requires a non-null measure."
+				);
+
+		this.descriptors =
+				descriptor == null
+						? new String[0]
+						: descriptor.clone();
+
+		initialize(
+				measure,
+				this.descriptors
+		);
 	}
 	
 	public void initialize (MEASURE m, String... descriptor) throws Exception{
@@ -560,30 +592,130 @@ public class DistanceMeasure implements Serializable {
 		}
 	}
 
-	public double distance(Object s, Object t) throws IOException, InterruptedException {
-		return this.distance(s, t, Double.POSITIVE_INFINITY);
+	//public double distance(Object s, Object t) throws IOException, InterruptedException {
+	//	return this.distance(s, t, Double.POSITIVE_INFINITY);
+	//}
+
+	/**
+	 * Computes a distance between stored or materialized series.
+	 *
+	 * <p>Lazy references are resolved independently. Eager objects pass through
+	 * unchanged.</p>
+	 */
+	public double distance(
+			Object s,
+			Object t
+	) throws IOException, InterruptedException {
+		return distance(
+				s,
+				t,
+				Double.POSITIVE_INFINITY
+		);
 	}
 
-	public double distance(Object s, Object t, double bsf) throws IOException, InterruptedException {
-		/*
-		 * Special case: user-provided Java distances may implement
-		 * LazyDistanceFunction. If so, let the user distance decide how and when
-		 * to load the series.
-		 */
-		if (this.distance_measure == MEASURE.javadistance) {
-			return computeJavaDistance(s, t);
+	/**
+	 * Computes a distance between stored or materialized series.
+	 *
+	 * <p>This compatibility entry point resolves ordinary lazy references and
+	 * then delegates to distanceResolved(). Custom Java distances implementing
+	 * LazyDistanceFunction retain control over their own resolution behavior.</p>
+	 */
+	public double distance(
+			Object first,
+			Object second,
+			double bestSoFar
+	) throws IOException, InterruptedException {
+
+		if (first == null || second == null) {
+			throw new IllegalArgumentException(
+					"Distance inputs cannot be null."
+			);
 		}
 
 		/*
-		* Resolving an eager object is a no-op. Resolving a LazySeriesRef
-		* loads that series exactly once for this distance call.
-		*/
-		s = resolveIfLazy(s);
-		t = resolveIfLazy(t);
+		 * Preserve the existing LazyDistanceFunction contract. Such a custom
+		 * Java distance receives the original stored representations and decides
+		 * when to resolve them.
+		 */
+		if (distance_measure == MEASURE.javadistance
+				&& distanceFunction
+				instanceof LazyDistanceFunction lazyDistance) {
 
-		double distance = Double.POSITIVE_INFINITY;
-		
-		switch (this.distance_measure) {
+			return lazyDistance.compute(
+					first,
+					second,
+					AppContext::readLazySeries
+			);
+		}
+
+		Object resolvedFirst =
+				resolveSeries(
+						first
+				);
+
+		Object resolvedSecond =
+				resolveSeries(
+						second
+				);
+
+		return distanceResolved(
+				resolvedFirst,
+				resolvedSecond,
+				bestSoFar
+		);
+	}
+
+	/**
+	 * Computes a distance between already materialized series.
+	 *
+	 * <p>This method never invokes a lazy reader. It is intended for hot loops
+	 * where the caller has deliberately chosen the resolution lifetime, such as
+	 * one query-to-exemplars comparison or one candidate split.</p>
+	 */
+	public double distanceResolved(
+			Object s,
+			Object t
+	) throws IOException, InterruptedException {
+		return distanceResolved(
+				s,
+				t,
+				Double.POSITIVE_INFINITY
+		);
+	}
+
+	/**
+	 * Computes a distance between already materialized series.
+	 *
+	 * @param s materialized first series
+	 * @param t materialized second series
+	 * @param bsf current best distance for early abandoning
+	 * @return distance value
+	 */
+	public double distanceResolved(
+			Object s,
+			Object t,
+			double bsf
+	) throws IOException, InterruptedException {
+
+		if (s == null || t == null) {
+			throw new IllegalArgumentException(
+					"Resolved distance inputs cannot be null."
+			);
+		}
+
+		if (s instanceof LazySeriesRef
+				|| t instanceof LazySeriesRef) {
+
+			throw new IllegalArgumentException(
+					"distanceResolved() received a LazySeriesRef. "
+							+ "Resolve the inputs with resolveSeries() first."
+			);
+		}
+
+		double distance =
+				Double.POSITIVE_INFINITY;
+
+		switch (distance_measure) {
 		case euclidean:
 		case shifazEUCLIDEAN:
 			distance = euc.distance(s, t, bsf);
@@ -640,9 +772,24 @@ public class DistanceMeasure implements Serializable {
 			distance = python.distance(s,t);
 			//distance = PythonDistance.distance(s,t);
 			break;
-		case javadistance:
+		/*case javadistance:
 			//distance = distanceFunction.compute(s,t);
 			distance = computeJavaDistance(s,t);
+			break;*/
+		case javadistance:
+			if (distanceFunction == null) {
+				throw new IllegalStateException(
+						"DistanceFunction is null for javadistance measure."
+				);
+			}
+
+			/*
+			 * distanceResolved() guarantees that both inputs have already been
+			 * materialized. Do not ask a LazyDistanceFunction to resolve them again.
+			 */
+			distance =
+					distanceFunction.compute(s,t);
+
 			break;
 		case manhattan:
 			distance = manhattan.distance(s,t,bsf);
@@ -784,10 +931,18 @@ public class DistanceMeasure implements Serializable {
 //		throw new Exception("Unknown distance measure");
 //		break;
 		}
-		if (distance == Double.POSITIVE_INFINITY) {
-			System.out.println("error ***********");
+		if (Double.isNaN(distance)) {
+			throw new IllegalStateException(
+					"Distance measure "
+							+ distance_measure
+							+ " returned NaN."
+			);
 		}
-		
+
+		/*
+		 * Positive infinity may be a legitimate early-abandoning result when
+		 * bestSoFar is finite. Do not print from the distance hot path.
+		 */
 		return distance;
 	}
 	
@@ -854,51 +1009,167 @@ public class DistanceMeasure implements Serializable {
 	
 	
 	//just to reuse this data structure
-	List<Integer> closest_nodes = new ArrayList<Integer>();
+	//List<Integer> closest_nodes = new ArrayList<Integer>();
 	
 	//public int find_closest_node(
 	//		double[] query,
 	//		double[][] exemplars,
 	//		boolean train,
 	//		String... dfile) throws Exception{
+	/**
+	 * Compatibility nearest-node method for stored or materialized inputs.
+	 *
+	 * <p>The query is resolved once and every exemplar is resolved once before
+	 * the comparison loop begins.</p>
+	 */
 	public int find_closest_node(
 			Object query,
 			Object[] exemplars,
 			boolean train,
-			String... dfile) throws Exception{
-		closest_nodes.clear();
-		double dist = Double.POSITIVE_INFINITY;
-		double bsf = Double.POSITIVE_INFINITY;		
+			String... distanceFiles
+	) throws Exception {
 
-		for (int i = 0; i < exemplars.length; i++) {
-			//double[] exemplar = exemplars[i];	//TODO indices must match
-			Object exemplar = exemplars[i];	//TODO indices must match
+		Object resolvedQuery =
+				resolveSeries(
+						query
+				);
 
-			if (AppContext.config_skip_distance_when_exemplar_matches_query && exemplar == query) {
-				return i;
+		Object[] resolvedExemplars =
+				resolveSeriesArray(
+						exemplars
+				);
+
+		return findClosestResolvedNode(
+				resolvedQuery,
+				resolvedExemplars,
+				AppContext.getRand()
+		);
+	}
+
+	/**
+	 * Finds the closest exemplar when every input has already been materialized.
+	 *
+	 * <p>All mutable nearest-node state is method-local, so separate calls may
+	 * execute concurrently when they use independent DistanceMeasure instances.
+	 * The current best distance is passed through to compatible distances for
+	 * early abandoning.</p>
+	 */
+	public int findClosestResolvedNode(
+			Object resolvedQuery,
+			Object[] resolvedExemplars,
+			Random random
+	) throws IOException, InterruptedException {
+
+		if (resolvedQuery == null) {
+			throw new IllegalArgumentException(
+					"Resolved query cannot be null."
+			);
+		}
+
+		if (resolvedQuery instanceof LazySeriesRef) {
+			throw new IllegalArgumentException(
+					"Resolved query cannot be a LazySeriesRef."
+			);
+		}
+
+		if (resolvedExemplars == null
+				|| resolvedExemplars.length == 0) {
+
+			throw new IllegalArgumentException(
+					"At least one resolved exemplar is required."
+			);
+		}
+
+		Objects.requireNonNull(
+				random,
+				"Nearest-node selection requires a Random instance."
+		);
+
+		double bestDistance =
+				Double.POSITIVE_INFINITY;
+
+		int[] tiedBranches =
+				new int[resolvedExemplars.length];
+
+		int tieCount =
+				0;
+
+		for (int branch = 0;
+			 branch < resolvedExemplars.length;
+			 branch++) {
+
+			Object exemplar =
+					resolvedExemplars[branch];
+
+			if (exemplar == null) {
+				throw new IllegalArgumentException(
+						"Resolved exemplar is null at branch "
+								+ branch
+								+ "."
+				);
 			}
-							
-			dist = this.distance(query, exemplar);
-			
-			if (dist < bsf) {
-				bsf = dist;
-				closest_nodes.clear();
-				closest_nodes.add(i);
-			}else if (dist == bsf) {
-//				if (distance == min_distance) {
-//					System.out.println("min distances are same " + distance + ":" + min_distance);
-//				}
-				bsf = dist;
-				closest_nodes.add(i);
+
+			if (exemplar instanceof LazySeriesRef) {
+				throw new IllegalArgumentException(
+						"Resolved exemplar is still a LazySeriesRef at branch "
+								+ branch
+								+ "."
+				);
+			}
+
+			if (AppContext
+					.config_skip_distance_when_exemplar_matches_query
+					&& exemplar == resolvedQuery) {
+
+				return branch;
+			}
+
+			double currentDistance =
+					distanceResolved(
+							resolvedQuery,
+							exemplar,
+							bestDistance
+					);
+
+			if (currentDistance < bestDistance) {
+				bestDistance =
+						currentDistance;
+
+				tiedBranches[0] =
+						branch;
+
+				tieCount =
+						1;
+			} else if (Double.compare(
+					currentDistance,
+					bestDistance
+			) == 0) {
+				tiedBranches[tieCount++] =
+						branch;
 			}
 		}
-		
-		int r = AppContext.getRand().nextInt(closest_nodes.size());
-		return closest_nodes.get(r);
+
+		if (tieCount == 0) {
+			throw new IllegalStateException(
+					"No closest branch was found for distance measure "
+							+ distance_measure
+							+ "."
+			);
+		}
+
+		if (tieCount == 1) {
+			return tiedBranches[0];
+		}
+
+		return tiedBranches[
+				random.nextInt(
+						tieCount
+				)
+				];
 	}
 
 	// for lazy datasets: resolve before passing to distances
-	private boolean isLazyObject(Object obj) {
+	/*private boolean isLazyObject(Object obj) {
 		return obj instanceof LazySeriesRef;
 	}
 
@@ -912,11 +1183,89 @@ public class DistanceMeasure implements Serializable {
 		}
 
 		return obj;
+	}*/
+
+	/**
+	 * Resolves one stored series representation.
+	 *
+	 * <p>A LazySeriesRef is materialized through its registered reader. An eager
+	 * object is returned unchanged. This supports all mixed combinations:</p>
+	 *
+	 * <pre>
+	 * eager query + eager exemplar
+	 * lazy query  + eager exemplar
+	 * eager query + lazy exemplar
+	 * lazy query  + lazy exemplar
+	 * </pre>
+	 *
+	 * @param series stored or already materialized series
+	 * @return materialized series
+	 */
+	public Object resolveSeries(
+			Object series
+	) {
+		if (series == null) {
+			throw new IllegalArgumentException(
+					"Cannot resolve a null series."
+			);
+		}
+
+		if (series instanceof LazySeriesRef reference) {
+			return AppContext
+					.getLazySeriesReader(
+							reference.getReaderKey()
+					)
+					.read(
+							reference
+					);
+		}
+
+		return series;
 	}
 
-	private double computeJavaDistance(
-			Object s,
-			Object t
+	/**
+	 * Resolves every element of a stored exemplar array exactly once.
+	 *
+	 * @param series stored or materialized series representations
+	 * @return newly allocated array containing materialized series
+	 */
+	public Object[] resolveSeriesArray(
+			Object[] series
+	) {
+		if (series == null) {
+			throw new IllegalArgumentException(
+					"Cannot resolve a null series array."
+			);
+		}
+
+		Object[] resolved =
+				new Object[series.length];
+
+		for (int index = 0;
+			 index < series.length;
+			 index++) {
+
+			resolved[index] =
+					resolveSeries(
+							series[index]
+					);
+		}
+
+		return resolved;
+	}
+
+	/**
+	 * Returns whether the supplied object is a lazy series reference.
+	 */
+	public static boolean isLazySeries(
+			Object series
+	) {
+		return series instanceof LazySeriesRef;
+	}
+
+	/*private double computeJavaDistance(
+			Object first,
+			Object second
 	) {
 		if (distanceFunction == null) {
 			throw new IllegalStateException(
@@ -924,31 +1273,31 @@ public class DistanceMeasure implements Serializable {
 			);
 		}
 
-		if (distanceFunction instanceof LazyDistanceFunction lazyDistance) {
+		if (distanceFunction
+				instanceof LazyDistanceFunction lazyDistance) {
 
 			return lazyDistance.compute(
-					s,
-					t,
+					first,
+					second,
 					AppContext::readLazySeries
 			);
 		}
 
-		/*if (AppContext.isLazyDataset ||
-				isLazyObject(s) ||
-				isLazyObject(t)) {
+		Object resolvedFirst =
+				resolveSeries(
+						first
+				);
 
-			Object resolvedS = resolveIfLazy(s);
-			Object resolvedT = resolveIfLazy(t);
+		Object resolvedSecond =
+				resolveSeries(
+						second
+				);
 
-			return distanceFunction.compute(resolvedS, resolvedT);
-		}*/
-
-		Object resolvedS = resolveIfLazy(s);
-		Object resolvedT = resolveIfLazy(t);
-
-		//return distanceFunction.compute(s, t);
-		return distanceFunction.compute(resolvedS, resolvedT);
-	}
+		return distanceFunction.compute(
+				resolvedFirst,
+				resolvedSecond
+		);
+	}*/
 
 
 	private int timeLengthOf(Object series) {
@@ -1015,6 +1364,59 @@ public class DistanceMeasure implements Serializable {
 		}
 
 		return -1;
+	}
+
+	/**
+	 * Creates an independent worker-local evaluator with the same selected
+	 * parameters.
+	 *
+	 * <p>The new DistanceMeasure reconstructs its concrete implementation from
+	 * the original measure and descriptors. Selected candidate parameters are
+	 * copied rather than randomized again.</p>
+	 */
+	public DistanceMeasure copyForEvaluation()
+			throws Exception {
+
+		DistanceMeasure copy =
+				new DistanceMeasure(
+						distance_measure,
+						descriptors
+				);
+
+		copy.windowSizeDTW =
+				windowSizeDTW;
+
+		copy.windowSizeDDTW =
+				windowSizeDDTW;
+
+		copy.windowSizeLCSS =
+				windowSizeLCSS;
+
+		copy.windowSizeERP =
+				windowSizeERP;
+
+		copy.epsilonLCSS =
+				epsilonLCSS;
+
+		copy.gERP =
+				gERP;
+
+		copy.nuTWE =
+				nuTWE;
+
+		copy.lambdaTWE =
+				lambdaTWE;
+
+		copy.cMSM =
+				cMSM;
+
+		copy.weightWDTW =
+				weightWDTW;
+
+		copy.weightWDDTW =
+				weightWDDTW;
+
+		return copy;
 	}
 	
 	
