@@ -5,6 +5,7 @@ import datasets.ListObjectDataset;
 import datasets.readers.DatasetReader;
 import datasets.readers.ReaderOptions;
 import datasets.readers.ReaderType;
+import preprocessing.standardization.StandardizationStats;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -33,7 +34,10 @@ import java.util.stream.Stream;
  * </ul>
  *
  * <p>The user-supplied plugin is responsible only for converting one
- * {@link LazySeriesRef} into one non-null instance object.</p>
+ * {@link LazySeriesRef} into one non-null raw instance object. When prepared
+ * standardization statistics are supplied for a numeric custom reader, PFGAP
+ * wraps the reconstructed plugin reader and standardizes each materialized
+ * instance exactly once.</p>
  *
  * <p>Example descriptor:</p>
  *
@@ -75,6 +79,7 @@ public final class LazyCustomPerFileReader
     private final boolean isNumeric;
     private final boolean hasMissingValues;
     private final boolean customReaderThreadSafe;
+    private final StandardizationStats standardizationStats;
 
     private final String readerKey;
 
@@ -96,6 +101,7 @@ public final class LazyCustomPerFileReader
                 options.isNumeric(),
                 options.hasMissingValues(),
                 options.isCustomReaderThreadSafe(),
+                options.getStandardizationStats(),
                 options.isTest()
                         ? "test"
                         : "train"
@@ -126,6 +132,7 @@ public final class LazyCustomPerFileReader
                 isNumeric,
                 hasMissingValues,
                 false,
+                null,
                 readerKey
         );
     }
@@ -156,6 +163,40 @@ public final class LazyCustomPerFileReader
             boolean isNumeric,
             boolean hasMissingValues,
             boolean customReaderThreadSafe,
+            String readerKey
+    ) {
+        this(
+                dataPath,
+                filePattern,
+                customReaderDescriptor,
+                customReaderParameters,
+                isTest,
+                isRegression,
+                isNumeric,
+                hasMissingValues,
+                customReaderThreadSafe,
+                null,
+                readerKey
+        );
+    }
+
+    /**
+     * Full constructor including optional prepared standardization statistics.
+     *
+     * @param standardizationStats prepared statistics applied by PFGAP after
+     *                             each lazy custom materialization, or null
+     */
+    public LazyCustomPerFileReader(
+            String dataPath,
+            String filePattern,
+            String customReaderDescriptor,
+            Map<String, String> customReaderParameters,
+            boolean isTest,
+            boolean isRegression,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            boolean customReaderThreadSafe,
+            StandardizationStats standardizationStats,
             String readerKey
     ) {
         this.dataPath =
@@ -194,6 +235,15 @@ public final class LazyCustomPerFileReader
 
         this.customReaderThreadSafe =
                 customReaderThreadSafe;
+
+        if (standardizationStats != null && !isNumeric) {
+            throw new IllegalArgumentException(
+                    "Lazy custom standardization requires isNumeric=true."
+            );
+        }
+
+        this.standardizationStats =
+                standardizationStats;
 
         this.readerKey =
                 requireNonblank(
@@ -245,7 +295,7 @@ public final class LazyCustomPerFileReader
                         hasMissingValues,
                         null,
                         false,
-                        null,
+                        standardizationStats,
                         LazySeriesReaderSpec
                                 .DEFAULT_INITIAL_TIME_CAPACITY,
                         customReaderDescriptor,

@@ -9,71 +9,25 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Fits reusable standardization statistics from an eager numeric
- * ListObjectDataset.
+ * Fits reusable standardization statistics from an eager numeric dataset.
  *
- * Phase 1 supports:
+ * <p>The fitter performs one value traversal. It trusts the configured
+ * numeric and missing-value contracts and retains only cheap structural
+ * checks. Primitive and boxed NaN values, plus boxed null values, are skipped.
+ * {@link OnlineMoments} owns finite-value and accumulator-overflow checks.</p>
  *
- *     method:
- *         Z_SCORE
- *
- *     scopes:
- *         GLOBAL
- *         PER_DIMENSION
- *
- *     instance representations:
- *         double[]
- *         Double[]
- *         double[][]
- *         Double[][]
- *
- * Univariate arrays are treated as containing one dimension.
- *
- * Multivariate arrays are expected to use dimension-major orientation:
- *
- *     data[dimension][time]
- *
- * Series may have unequal lengths. For PER_DIMENSION fitting, values from
- * dimension d are accumulated together across every training instance and
- * time point.
- *
- * Missing-value behavior:
- *
- *     Double null:
- *         skipped
- *
- *     NaN:
- *         skipped
- *
- *     positive or negative infinity:
- *         rejected
- *
- * LazySeriesRef instances are rejected. Initial Phase 1 fitting operates on
- * eager datasets only. Lazy fitting can later be implemented as an explicit
- * streaming pass over the source files.
+ * <p>Supported instance representations are {@code double[]},
+ * {@code Double[]}, {@code double[][]}, and {@code Double[][]}.
+ * Multivariate arrays are dimension-major.</p>
  */
 public final class StandardizationFitter {
 
-    /**
-     * Default scale used for a constant group or a group with too few
-     * observations to calculate variance under the requested convention.
-     *
-     * Using scale 1.0 causes centered constant values to become zero:
-     *
-     *     (x - center) / 1.0 = 0.0
-     */
     public static final double CONSTANT_SCALE = 1.0;
 
     private StandardizationFitter() {
+        // Utility class.
     }
 
-    /**
-     * Fits z-score statistics using per-dimension scope and population
-     * variance.
-     *
-     * @param dataset eager numeric training dataset
-     * @return fitted standardization statistics
-     */
     public static StandardizationStats fit(
             ListObjectDataset dataset
     ) {
@@ -86,14 +40,6 @@ public final class StandardizationFitter {
         );
     }
 
-    /**
-     * Fits z-score statistics using the supplied scope and population
-     * variance.
-     *
-     * @param dataset eager numeric training dataset
-     * @param scope global or per-dimension fitting scope
-     * @return fitted standardization statistics
-     */
     public static StandardizationStats fit(
             ListObjectDataset dataset,
             StandardizationScope scope
@@ -107,15 +53,6 @@ public final class StandardizationFitter {
         );
     }
 
-    /**
-     * Fits z-score statistics using the supplied scope and variance
-     * convention.
-     *
-     * @param dataset eager numeric training dataset
-     * @param scope global or per-dimension fitting scope
-     * @param varianceConvention population or sample variance
-     * @return fitted standardization statistics
-     */
     public static StandardizationStats fit(
             ListObjectDataset dataset,
             StandardizationScope scope,
@@ -130,15 +67,6 @@ public final class StandardizationFitter {
         );
     }
 
-    /**
-     * Fits z-score statistics with optional ordered feature names.
-     *
-     * @param dataset eager numeric training dataset
-     * @param scope global or per-dimension fitting scope
-     * @param varianceConvention population or sample variance
-     * @param featureNames ordered feature names, or an empty list
-     * @return fitted standardization statistics
-     */
     public static StandardizationStats fit(
             ListObjectDataset dataset,
             StandardizationScope scope,
@@ -155,18 +83,7 @@ public final class StandardizationFitter {
     }
 
     /**
-     * Fits reusable standardization statistics from an eager numeric
-     * training dataset.
-     *
-     * In Phase 1, only Z_SCORE with GLOBAL or PER_DIMENSION scope is
-     * implemented.
-     *
-     * @param dataset eager numeric training dataset
-     * @param method standardization formula
-     * @param scope statistics-fitting scope
-     * @param varianceConvention population or sample variance
-     * @param featureNames optional ordered feature names
-     * @return immutable fitted statistics
+     * Fits reusable statistics in one pass over accepted numeric values.
      */
     public static StandardizationStats fit(
             ListObjectDataset dataset,
@@ -175,48 +92,57 @@ public final class StandardizationFitter {
             VarianceConvention varianceConvention,
             List<String> featureNames
     ) {
-        validateConfiguration(
-                dataset,
-                method,
-                scope,
-                varianceConvention
+        Objects.requireNonNull(dataset, "Dataset cannot be null.");
+        Objects.requireNonNull(method, "StandardizationMethod cannot be null.");
+        Objects.requireNonNull(scope, "StandardizationScope cannot be null.");
+        Objects.requireNonNull(
+                varianceConvention,
+                "VarianceConvention cannot be null."
         );
 
-        DatasetShape shape =
-                inspectDatasetShape(dataset);
+        if (method != StandardizationMethod.Z_SCORE) {
+            throw new UnsupportedOperationException(
+                    "Standardization method " + method + " is not implemented."
+            );
+        }
+
+        if (scope != StandardizationScope.GLOBAL
+                && scope != StandardizationScope.PER_DIMENSION) {
+
+            throw new UnsupportedOperationException(
+                    "Standardization scope " + scope + " is not implemented."
+            );
+        }
+
+        List<Object> data =
+                Objects.requireNonNull(
+                        dataset.getData(),
+                        "Dataset data cannot be null."
+                );
+
+        if (data.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Cannot fit standardization statistics from an empty dataset."
+            );
+        }
+
+        int dimensionCount =
+                dimensionCountOf(firstRealizedInstance(data));
 
         List<String> normalizedFeatureNames =
                 validateAndCopyFeatureNames(
                         featureNames,
-                        shape.dimensionCount,
+                        dimensionCount,
                         scope
                 );
 
         OnlineMoments[] moments =
-                createAccumulators(
-                        scope,
-                        shape.dimensionCount
-                );
+                createAccumulators(scope, dimensionCount);
 
-        for (int instanceIndex = 0;
-             instanceIndex < dataset.getData().size();
-             instanceIndex++) {
-
-            Object instance =
-                    dataset.getData().get(instanceIndex);
-
-            if (instance == null) {
-                throw new IllegalArgumentException(
-                        "Training dataset contains a null instance at index "
-                                + instanceIndex
-                                + "."
-                );
-            }
-
+        for (Object instance : data) {
             accumulateInstance(
                     instance,
-                    instanceIndex,
-                    shape,
+                    dimensionCount,
                     scope,
                     moments
             );
@@ -231,213 +157,43 @@ public final class StandardizationFitter {
         );
     }
 
-    private static void validateConfiguration(
-            ListObjectDataset dataset,
-            StandardizationMethod method,
-            StandardizationScope scope,
-            VarianceConvention varianceConvention
+    private static Object firstRealizedInstance(
+            List<Object> data
     ) {
-        Objects.requireNonNull(
-                dataset,
-                "Training dataset cannot be null."
-        );
-
-        Objects.requireNonNull(
-                method,
-                "StandardizationMethod cannot be null."
-        );
-
-        Objects.requireNonNull(
-                scope,
-                "StandardizationScope cannot be null."
-        );
-
-        Objects.requireNonNull(
-                varianceConvention,
-                "VarianceConvention cannot be null."
-        );
-
-        method.requireImplemented();
-        scope.requireImplemented();
-
-        if (method == StandardizationMethod.NONE) {
-            throw new IllegalArgumentException(
-                    "Standardization statistics cannot be fitted for "
-                            + "StandardizationMethod.NONE."
-            );
-        }
-
-        if (method != StandardizationMethod.Z_SCORE) {
-            throw new UnsupportedOperationException(
-                    "StandardizationFitter currently supports only "
-                            + "Z_SCORE, but received: "
-                            + method
-            );
-        }
-
-        if (dataset.getData() == null
-                || dataset.getData().isEmpty()) {
-
-            throw new IllegalArgumentException(
-                    "Cannot fit standardization statistics from an "
-                            + "empty dataset."
-            );
-        }
-    }
-
-    /**
-     * Determines the numeric representation and fixed dimension count.
-     *
-     * Series lengths may differ, but every instance must use the same broad
-     * representation family and dimension count.
-     */
-    private static DatasetShape inspectDatasetShape(
-            ListObjectDataset dataset
-    ) {
-        NumericRepresentation representation =
-                null;
-
-        int dimensionCount =
-                -1;
-
-        for (int instanceIndex = 0;
-             instanceIndex < dataset.getData().size();
-             instanceIndex++) {
-
-            Object instance =
-                    dataset.getData().get(instanceIndex);
-
-            if (instance == null) {
-                throw new IllegalArgumentException(
-                        "Training dataset contains a null instance at index "
-                                + instanceIndex
-                                + "."
-                );
-            }
-
-            if (instance instanceof LazySeriesRef) {
-                throw new UnsupportedOperationException(
-                        "StandardizationFitter cannot fit statistics "
-                                + "directly from LazySeriesRef objects. "
-                                + "Supply precomputed statistics or use a "
-                                + "future streaming lazy-data fitting pass."
-                );
-            }
-
-            NumericRepresentation currentRepresentation =
-                    numericRepresentationOf(
-                            instance,
-                            instanceIndex
+        for (Object instance : data) {
+            if (instance != null) {
+                if (instance instanceof LazySeriesRef) {
+                    throw new UnsupportedOperationException(
+                            "Standardization fitting requires eager realized data."
                     );
-
-            int currentDimensionCount =
-                    dimensionCountOf(
-                            instance,
-                            currentRepresentation
-                    );
-
-            if (currentDimensionCount <= 0) {
-                throw new IllegalArgumentException(
-                        "Training instance "
-                                + instanceIndex
-                                + " contains no dimensions."
-                );
+                }
+                return instance;
             }
-
-            if (representation == null) {
-                representation =
-                        currentRepresentation;
-
-                dimensionCount =
-                        currentDimensionCount;
-
-                continue;
-            }
-
-            if (representation != currentRepresentation) {
-                throw new IllegalArgumentException(
-                        "Training dataset mixes numeric array "
-                                + "representations. The first instance uses "
-                                + representation
-                                + ", while instance "
-                                + instanceIndex
-                                + " uses "
-                                + currentRepresentation
-                                + "."
-                );
-            }
-
-            if (dimensionCount != currentDimensionCount) {
-                throw new IllegalArgumentException(
-                        "Inconsistent dimension count at training instance "
-                                + instanceIndex
-                                + ". Expected "
-                                + dimensionCount
-                                + " dimensions but found "
-                                + currentDimensionCount
-                                + "."
-                );
-            }
-        }
-
-        if (representation == null) {
-            throw new IllegalArgumentException(
-                    "Could not determine the training dataset's numeric "
-                            + "representation."
-            );
-        }
-
-        return new DatasetShape(
-                representation,
-                dimensionCount
-        );
-    }
-
-    private static NumericRepresentation numericRepresentationOf(
-            Object instance,
-            int instanceIndex
-    ) {
-        if (instance instanceof double[]) {
-            return NumericRepresentation.PRIMITIVE_UNIVARIATE;
-        }
-
-        if (instance instanceof Double[]) {
-            return NumericRepresentation.BOXED_UNIVARIATE;
-        }
-
-        if (instance instanceof double[][]) {
-            return NumericRepresentation.PRIMITIVE_MULTIVARIATE;
-        }
-
-        if (instance instanceof Double[][]) {
-            return NumericRepresentation.BOXED_MULTIVARIATE;
         }
 
         throw new IllegalArgumentException(
-                "Unsupported training instance type at index "
-                        + instanceIndex
-                        + ": "
-                        + instance.getClass().getName()
-                        + ". Phase 1 standardization supports double[], "
-                        + "Double[], double[][], and Double[][]."
+                "Training dataset contains no realized instances."
         );
     }
 
     private static int dimensionCountOf(
-            Object instance,
-            NumericRepresentation representation
+            Object instance
     ) {
-        return switch (representation) {
-            case PRIMITIVE_UNIVARIATE,
-                    BOXED_UNIVARIATE ->
-                    1;
+        if (instance instanceof double[] || instance instanceof Double[]) {
+            return 1;
+        }
 
-            case PRIMITIVE_MULTIVARIATE ->
-                    ((double[][]) instance).length;
+        if (instance instanceof double[][] matrix) {
+            requirePositiveDimensionCount(matrix.length);
+            return matrix.length;
+        }
 
-            case BOXED_MULTIVARIATE ->
-                    ((Double[][]) instance).length;
-        };
+        if (instance instanceof Double[][] matrix) {
+            requirePositiveDimensionCount(matrix.length);
+            return matrix.length;
+        }
+
+        throw unsupportedSeriesType(instance);
     }
 
     private static OnlineMoments[] createAccumulators(
@@ -445,19 +201,15 @@ public final class StandardizationFitter {
             int dimensionCount
     ) {
         int groupCount =
-                scope.statisticGroupCount(
-                        dimensionCount
-                );
+                scope == StandardizationScope.GLOBAL
+                        ? 1
+                        : dimensionCount;
 
         OnlineMoments[] moments =
                 new OnlineMoments[groupCount];
 
-        for (int groupIndex = 0;
-             groupIndex < groupCount;
-             groupIndex++) {
-
-            moments[groupIndex] =
-                    new OnlineMoments();
+        for (int group = 0; group < groupCount; group++) {
+            moments[group] = new OnlineMoments();
         }
 
         return moments;
@@ -465,337 +217,92 @@ public final class StandardizationFitter {
 
     private static void accumulateInstance(
             Object instance,
-            int instanceIndex,
-            DatasetShape shape,
-            StandardizationScope scope,
-            OnlineMoments[] moments
-    ) {
-        switch (shape.representation) {
-            case PRIMITIVE_UNIVARIATE ->
-                    accumulatePrimitiveUnivariate(
-                            (double[]) instance,
-                            instanceIndex,
-                            moments[0]
-                    );
-
-            case BOXED_UNIVARIATE ->
-                    accumulateBoxedUnivariate(
-                            (Double[]) instance,
-                            instanceIndex,
-                            moments[0]
-                    );
-
-            case PRIMITIVE_MULTIVARIATE ->
-                    accumulatePrimitiveMultivariate(
-                            (double[][]) instance,
-                            instanceIndex,
-                            shape.dimensionCount,
-                            scope,
-                            moments
-                    );
-
-            case BOXED_MULTIVARIATE ->
-                    accumulateBoxedMultivariate(
-                            (Double[][]) instance,
-                            instanceIndex,
-                            shape.dimensionCount,
-                            scope,
-                            moments
-                    );
-        }
-    }
-
-    private static void accumulatePrimitiveUnivariate(
-            double[] series,
-            int instanceIndex,
-            OnlineMoments moments
-    ) {
-        if (series.length == 0) {
-            throw new IllegalArgumentException(
-                    "Training instance "
-                            + instanceIndex
-                            + " is an empty univariate series."
-            );
-        }
-
-        for (int timeIndex = 0;
-             timeIndex < series.length;
-             timeIndex++) {
-
-            addPrimitiveValue(
-                    series[timeIndex],
-                    instanceIndex,
-                    0,
-                    timeIndex,
-                    moments
-            );
-        }
-    }
-
-    private static void accumulateBoxedUnivariate(
-            Double[] series,
-            int instanceIndex,
-            OnlineMoments moments
-    ) {
-        if (series.length == 0) {
-            throw new IllegalArgumentException(
-                    "Training instance "
-                            + instanceIndex
-                            + " is an empty univariate series."
-            );
-        }
-
-        for (int timeIndex = 0;
-             timeIndex < series.length;
-             timeIndex++) {
-
-            addBoxedValue(
-                    series[timeIndex],
-                    instanceIndex,
-                    0,
-                    timeIndex,
-                    moments
-            );
-        }
-    }
-
-    private static void accumulatePrimitiveMultivariate(
-            double[][] series,
-            int instanceIndex,
             int expectedDimensionCount,
             StandardizationScope scope,
             OnlineMoments[] moments
     ) {
-        validateMultivariateDimensionCount(
-                series.length,
-                expectedDimensionCount,
-                instanceIndex
-        );
+        Objects.requireNonNull(instance, "Training instance cannot be null.");
 
-        for (int dimensionIndex = 0;
-             dimensionIndex < series.length;
-             dimensionIndex++) {
-
-            double[] dimension =
-                    series[dimensionIndex];
-
-            if (dimension == null) {
-                throw new IllegalArgumentException(
-                        "Training instance "
-                                + instanceIndex
-                                + " contains a null primitive dimension at "
-                                + "index "
-                                + dimensionIndex
-                                + "."
-                );
-            }
-
-            if (dimension.length == 0) {
-                throw new IllegalArgumentException(
-                        "Training instance "
-                                + instanceIndex
-                                + ", dimension "
-                                + dimensionIndex
-                                + " contains no time points."
-                );
-            }
-
-            OnlineMoments accumulator =
-                    accumulatorForDimension(
-                            scope,
-                            moments,
-                            dimensionIndex
-                    );
-
-            for (int timeIndex = 0;
-                 timeIndex < dimension.length;
-                 timeIndex++) {
-
-                addPrimitiveValue(
-                        dimension[timeIndex],
-                        instanceIndex,
-                        dimensionIndex,
-                        timeIndex,
-                        accumulator
-                );
-            }
+        if (instance instanceof LazySeriesRef) {
+            throw new UnsupportedOperationException(
+                    "Standardization fitting requires eager realized data."
+            );
         }
+
+        if (instance instanceof double[] values) {
+            requireUnivariateCompatibility(expectedDimensionCount);
+            accumulatePrimitiveDimension(values, moments[0]);
+            return;
+        }
+
+        if (instance instanceof Double[] values) {
+            requireUnivariateCompatibility(expectedDimensionCount);
+            accumulateBoxedDimension(values, moments[0]);
+            return;
+        }
+
+        if (instance instanceof double[][] matrix) {
+            requireExpectedDimensionCount(matrix.length, expectedDimensionCount);
+
+            for (int dimension = 0; dimension < matrix.length; dimension++) {
+                accumulatePrimitiveDimension(
+                        Objects.requireNonNull(
+                                matrix[dimension],
+                                "Training series contains a null dimension."
+                        ),
+                        accumulator(scope, moments, dimension)
+                );
+            }
+            return;
+        }
+
+        if (instance instanceof Double[][] matrix) {
+            requireExpectedDimensionCount(matrix.length, expectedDimensionCount);
+
+            for (int dimension = 0; dimension < matrix.length; dimension++) {
+                accumulateBoxedDimension(
+                        Objects.requireNonNull(
+                                matrix[dimension],
+                                "Training series contains a null dimension."
+                        ),
+                        accumulator(scope, moments, dimension)
+                );
+            }
+            return;
+        }
+
+        throw unsupportedSeriesType(instance);
     }
 
-    private static void accumulateBoxedMultivariate(
-            Double[][] series,
-            int instanceIndex,
-            int expectedDimensionCount,
-            StandardizationScope scope,
-            OnlineMoments[] moments
-    ) {
-        validateMultivariateDimensionCount(
-                series.length,
-                expectedDimensionCount,
-                instanceIndex
-        );
-
-        for (int dimensionIndex = 0;
-             dimensionIndex < series.length;
-             dimensionIndex++) {
-
-            Double[] dimension =
-                    series[dimensionIndex];
-
-            if (dimension == null) {
-                throw new IllegalArgumentException(
-                        "Training instance "
-                                + instanceIndex
-                                + " contains a null boxed dimension at index "
-                                + dimensionIndex
-                                + "."
-                );
-            }
-
-            if (dimension.length == 0) {
-                throw new IllegalArgumentException(
-                        "Training instance "
-                                + instanceIndex
-                                + ", dimension "
-                                + dimensionIndex
-                                + " contains no time points."
-                );
-            }
-
-            OnlineMoments accumulator =
-                    accumulatorForDimension(
-                            scope,
-                            moments,
-                            dimensionIndex
-                    );
-
-            for (int timeIndex = 0;
-                 timeIndex < dimension.length;
-                 timeIndex++) {
-
-                addBoxedValue(
-                        dimension[timeIndex],
-                        instanceIndex,
-                        dimensionIndex,
-                        timeIndex,
-                        accumulator
-                );
-            }
-        }
-    }
-
-    private static OnlineMoments accumulatorForDimension(
+    private static OnlineMoments accumulator(
             StandardizationScope scope,
             OnlineMoments[] moments,
-            int dimensionIndex
+            int dimension
     ) {
-        return switch (scope) {
-            case GLOBAL ->
-                    moments[0];
-
-            case PER_DIMENSION ->
-                    moments[dimensionIndex];
-
-            case PER_SERIES,
-                    PER_SERIES_PER_DIMENSION ->
-                    throw new UnsupportedOperationException(
-                            "Scope "
-                                    + scope
-                                    + " is not supported by the Phase 1 "
-                                    + "training-statistics fitter."
-                    );
-        };
+        return scope == StandardizationScope.GLOBAL
+                ? moments[0]
+                : moments[dimension];
     }
 
-    /**
-     * Primitive NaN values are treated as missing and skipped. Infinite
-     * values are rejected because they cannot produce meaningful moments.
-     */
-    private static void addPrimitiveValue(
-            double value,
-            int instanceIndex,
-            int dimensionIndex,
-            int timeIndex,
+    private static void accumulatePrimitiveDimension(
+            double[] values,
             OnlineMoments moments
     ) {
-        if (Double.isNaN(value)) {
-            return;
+        for (double value : values) {
+            if (!Double.isNaN(value)) {
+                moments.add(value);
+            }
         }
-
-        if (Double.isInfinite(value)) {
-            throw nonFiniteValueException(
-                    value,
-                    instanceIndex,
-                    dimensionIndex,
-                    timeIndex
-            );
-        }
-
-        moments.add(value);
     }
 
-    /**
-     * Boxed null and NaN values are treated as missing and skipped.
-     * Infinite values are rejected.
-     */
-    private static void addBoxedValue(
-            Double value,
-            int instanceIndex,
-            int dimensionIndex,
-            int timeIndex,
+    private static void accumulateBoxedDimension(
+            Double[] values,
             OnlineMoments moments
     ) {
-        if (value == null || Double.isNaN(value)) {
-            return;
-        }
-
-        if (Double.isInfinite(value)) {
-            throw nonFiniteValueException(
-                    value,
-                    instanceIndex,
-                    dimensionIndex,
-                    timeIndex
-            );
-        }
-
-        moments.add(value);
-    }
-
-    private static IllegalArgumentException nonFiniteValueException(
-            double value,
-            int instanceIndex,
-            int dimensionIndex,
-            int timeIndex
-    ) {
-        return new IllegalArgumentException(
-                "Encountered infinite numeric value "
-                        + value
-                        + " at training instance "
-                        + instanceIndex
-                        + ", dimension "
-                        + dimensionIndex
-                        + ", time index "
-                        + timeIndex
-                        + ". Infinite values cannot be used to fit "
-                        + "standardization statistics."
-        );
-    }
-
-    private static void validateMultivariateDimensionCount(
-            int actualDimensionCount,
-            int expectedDimensionCount,
-            int instanceIndex
-    ) {
-        if (actualDimensionCount != expectedDimensionCount) {
-            throw new IllegalArgumentException(
-                    "Inconsistent dimension count at training instance "
-                            + instanceIndex
-                            + ". Expected "
-                            + expectedDimensionCount
-                            + " dimensions but found "
-                            + actualDimensionCount
-                            + "."
-            );
+        for (Double value : values) {
+            if (value != null && !Double.isNaN(value)) {
+                moments.add(value);
+            }
         }
     }
 
@@ -806,41 +313,24 @@ public final class StandardizationFitter {
             List<String> featureNames,
             OnlineMoments[] moments
     ) {
-        long[] counts =
-                new long[moments.length];
+        long[] counts = new long[moments.length];
+        double[] centers = new double[moments.length];
+        double[] scales = new double[moments.length];
 
-        double[] centers =
-                new double[moments.length];
-
-        double[] scales =
-                new double[moments.length];
-
-        for (int groupIndex = 0;
-             groupIndex < moments.length;
-             groupIndex++) {
-
-            OnlineMoments accumulator =
-                    moments[groupIndex];
+        for (int group = 0; group < moments.length; group++) {
+            OnlineMoments accumulator = moments[group];
 
             if (!accumulator.hasObservations()) {
                 throw new IllegalArgumentException(
                         "Standardization statistic group "
-                                + groupIndex
-                                + " contains no finite observations."
+                                + group
+                                + " contains no observations."
                 );
             }
 
-            counts[groupIndex] =
-                    accumulator.getCount();
-
-            centers[groupIndex] =
-                    accumulator.getMean();
-
-            scales[groupIndex] =
-                    fittedScale(
-                            accumulator,
-                            varianceConvention
-                    );
+            counts[group] = accumulator.getCount();
+            centers[group] = accumulator.getMean();
+            scales[group] = fittedScale(accumulator, varianceConvention);
         }
 
         return new StandardizationStats(
@@ -854,40 +344,20 @@ public final class StandardizationFitter {
         );
     }
 
-    /**
-     * Returns a usable positive scale.
-     *
-     * A constant group or a group with insufficient observations for sample
-     * variance receives scale 1.0. This causes centered values from that
-     * group to transform to zero without division by zero.
-     */
     private static double fittedScale(
             OnlineMoments moments,
             VarianceConvention varianceConvention
     ) {
-        if (!moments.canCalculateVariance(
-                varianceConvention
-        )) {
+        if (!moments.canCalculateVariance(varianceConvention)) {
             return CONSTANT_SCALE;
         }
 
         double standardDeviation =
-                moments.getStandardDeviation(
-                        varianceConvention
-                );
+                moments.getStandardDeviation(varianceConvention);
 
-        if (!Double.isFinite(standardDeviation)) {
-            throw new IllegalArgumentException(
-                    "Fitted standard deviation is not finite: "
-                            + standardDeviation
-            );
-        }
-
-        if (standardDeviation == 0.0) {
-            return CONSTANT_SCALE;
-        }
-
-        return standardDeviation;
+        return standardDeviation == 0.0
+                ? CONSTANT_SCALE
+                : standardDeviation;
     }
 
     private static List<String> validateAndCopyFeatureNames(
@@ -899,81 +369,71 @@ public final class StandardizationFitter {
             return Collections.emptyList();
         }
 
-        List<String> copied =
-                new ArrayList<>(
-                        featureNames.size()
-                );
-
-        for (int featureIndex = 0;
-             featureIndex < featureNames.size();
-             featureIndex++) {
-
-            String featureName =
-                    featureNames.get(featureIndex);
-
-            if (featureName == null
-                    || featureName.isBlank()) {
-
-                throw new IllegalArgumentException(
-                        "Feature name at index "
-                                + featureIndex
-                                + " cannot be null or blank."
-                );
-            }
-
-            copied.add(
-                    featureName.trim()
-            );
-        }
-
-        /*
-         * Even GLOBAL statistics benefit from retaining the complete ordered
-         * feature list as schema metadata.
-         */
-        if (copied.size() != dimensionCount) {
+        if (featureNames.size() != dimensionCount) {
             throw new IllegalArgumentException(
-                    "The training data contains "
+                    "Training data contains "
                             + dimensionCount
                             + " dimension(s), but "
-                            + copied.size()
+                            + featureNames.size()
                             + " feature name(s) were supplied for "
                             + scope
                             + " standardization."
             );
         }
 
-        return Collections.unmodifiableList(
-                copied
-        );
-    }
+        List<String> copy = new ArrayList<>(featureNames.size());
 
-    private enum NumericRepresentation {
-
-        PRIMITIVE_UNIVARIATE,
-
-        BOXED_UNIVARIATE,
-
-        PRIMITIVE_MULTIVARIATE,
-
-        BOXED_MULTIVARIATE
-    }
-
-    private static final class DatasetShape {
-
-        private final NumericRepresentation representation;
-        private final int dimensionCount;
-
-        private DatasetShape(
-                NumericRepresentation representation,
-                int dimensionCount
-        ) {
-            this.representation =
-                    Objects.requireNonNull(
-                            representation
-                    );
-
-            this.dimensionCount =
-                    dimensionCount;
+        for (String featureName : featureNames) {
+            if (featureName == null || featureName.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Standardization feature names cannot be null or blank."
+                );
+            }
+            copy.add(featureName.trim());
         }
+
+        return Collections.unmodifiableList(copy);
+    }
+
+    private static void requirePositiveDimensionCount(
+            int dimensionCount
+    ) {
+        if (dimensionCount < 1) {
+            throw new IllegalArgumentException(
+                    "Numeric series must contain at least one dimension."
+            );
+        }
+    }
+
+    private static void requireUnivariateCompatibility(
+            int expectedDimensionCount
+    ) {
+        requireExpectedDimensionCount(1, expectedDimensionCount);
+    }
+
+    private static void requireExpectedDimensionCount(
+            int actual,
+            int expected
+    ) {
+        if (actual != expected) {
+            throw new IllegalArgumentException(
+                    "Training series contains "
+                            + actual
+                            + " dimensions; expected "
+                            + expected
+                            + "."
+            );
+        }
+    }
+
+    private static IllegalArgumentException unsupportedSeriesType(
+            Object instance
+    ) {
+        return new IllegalArgumentException(
+                "Unsupported standardization training type: "
+                        + instance.getClass().getTypeName()
+                        + ". Expected double[], Double[], double[][], or "
+                        + "Double[][]."
+        );
     }
 }
