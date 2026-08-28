@@ -7,13 +7,13 @@ import distance.DistanceMeasure;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+//import java.util.ArrayList;
+//import java.util.Collections;
+//import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ThreadLocalRandom;
+//import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.IntStream;
 
 /**
@@ -821,6 +821,103 @@ public class Splitter
 				resolvedExemplars,
 				random
 		);
+	}
+
+	/**
+	 * Assigns every instance in a dataset to a branch of the selected split.
+	 *
+	 * <p>The selected node exemplars are materialized once for the complete
+	 * batch. Each query is materialized once, compared with the materialized
+	 * exemplars, and then released.</p>
+	 *
+	 * <p>The dataset itself is not modified, and lazy query references remain
+	 * stored in the dataset.</p>
+	 *
+	 * @param data stored eager or lazy query representations
+	 * @param batchSeed deterministic seed for tie-breaking
+	 * @return one branch index per dataset instance
+	 */
+	public int[] findClosestBranches(
+			ObjectDataset data,
+			long batchSeed
+	) throws IOException, InterruptedException {
+
+		if (data == null) {
+			throw new IllegalArgumentException(
+					"Cannot route a null dataset."
+			);
+		}
+
+		if (distance_measure == null) {
+			throw new IllegalStateException(
+					"Splitter has no selected distance measure."
+			);
+		}
+
+		if (exemplars == null || exemplars.length == 0) {
+			throw new IllegalStateException(
+					"Splitter has no selected exemplars."
+			);
+		}
+
+		Object[] resolvedExemplars =
+				distance_measure.resolveSeriesArray(
+						exemplars
+				);
+
+		int[] assignments =
+				new int[data.size()];
+
+		for (int index = 0;
+			 index < data.size();
+			 index++) {
+
+			Object storedQuery =
+					data.get_series(
+							index
+					);
+
+			int matchingExemplar =
+					findStoredExemplarMatch(
+							storedQuery,
+							exemplars
+					);
+
+			if (matchingExemplar >= 0
+					&& AppContext
+					.config_skip_distance_when_exemplar_matches_query) {
+
+				assignments[index] =
+						matchingExemplar;
+
+				continue;
+			}
+
+			Object resolvedQuery =
+					distance_measure.resolveSeries(
+							storedQuery
+					);
+
+			Random queryRandom =
+					new Random(
+							mixSeed(
+									batchSeed,
+									stableInstanceIdentity(
+											data,
+											index
+									)
+							)
+					);
+
+			assignments[index] =
+					distance_measure.findClosestResolvedNode(
+							resolvedQuery,
+							resolvedExemplars,
+							queryRandom
+					);
+		}
+
+		return assignments;
 	}
 
 	public ObjectDataset[] getBestSplits() {

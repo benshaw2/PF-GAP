@@ -133,7 +133,18 @@ public class ExperimentRunner {
 
 			printRepetitionHeader(repetition, datasetName);
 
+			clearProximityResults();
+
 			Map<String, String> artifacts = new LinkedHashMap<>();
+
+			Map<String, Double> additionalMetrics =
+					new LinkedHashMap<>();
+
+			Map<String, Long> additionalCounts =
+					new LinkedHashMap<>();
+
+			Map<String, Double> additionalTimings =
+					new LinkedHashMap<>();
 
 			if (AppContext.perform_train_imputation) {
 				ProximityImputation.imputeTraining(
@@ -142,6 +153,8 @@ public class ExperimentRunner {
 						(forest, data) -> computeTrainProximities(forest, data)
 				);
 			}
+
+			clearProximityResults(); // not the final proximities.
 
 			ProximityForest forest = new ProximityForest(
 					repetition,
@@ -164,14 +177,43 @@ public class ExperimentRunner {
 
 			if (test_data != null) {
 				//runValidationTesting(forest, repetition, datasetName);
-				result = runValidationTesting(forest, repetition, datasetName, artifacts);
+				result = runValidationTesting(
+						forest,
+						repetition,
+						datasetName,
+						artifacts,
+						additionalMetrics,
+						additionalCounts,
+						additionalTimings
+				);
 			}
 
-			//handleTrainingOutlierScores(forest);
-			Path trainingOutlierPath = handleTrainingOutlierScores(forest, repetition);
+			ScoreArtifact trainingOutlierArtifact =
+					handleTrainingOutlierScores(
+							forest,
+							repetition
+					);
 
-			if (trainingOutlierPath != null) {
-				artifacts.put("trainingOutlierScores", relativeArtifactPath(trainingOutlierPath));
+			if (trainingOutlierArtifact != null) {
+				artifacts.put(
+						"trainingOutlierScores",
+						relativeArtifactPath(
+								trainingOutlierArtifact.path()
+						)
+				);
+
+				addScoreArtifactResults(
+						trainingOutlierArtifact,
+						AppContext.isIsolationMode()
+								? "trainingIsolationScore"
+								: "trainingProximityOutlierScore",
+						AppContext.isIsolationMode()
+								? "trainingIsolationScoringMilliseconds"
+								: "trainingProximityOutlierScoringMilliseconds",
+						additionalMetrics,
+						additionalCounts,
+						additionalTimings
+				);
 			}
 
 			//handleRequestedTrainingProximities(forest);
@@ -181,17 +223,20 @@ public class ExperimentRunner {
 			addArtifacts(artifacts, proximityArtifacts);
 
 			if (result == null) {
-				result = new ProximityForestResult(forest);
+				result = forest.getResultSet();
 			}
 
-			result.collateResults();
+			//result.collateResults();
 
 			experimentResults.add(
 					buildExperimentResultRecord(
 							result,
 							datasetName,
 							repetition,
-							artifacts
+							artifacts,
+							additionalMetrics,
+							additionalCounts,
+							additionalTimings
 					)
 			);
 
@@ -274,7 +319,18 @@ public class ExperimentRunner {
 			 repetition < AppContext.num_repeats;
 			 repetition++) {
 
+			clearProximityResults();
+
 			Map<String, String> artifacts =
+					new LinkedHashMap<>();
+
+			Map<String, Double> additionalMetrics =
+					new LinkedHashMap<>();
+
+			Map<String, Long> additionalCounts =
+					new LinkedHashMap<>();
+
+			Map<String, Double> additionalTimings =
 					new LinkedHashMap<>();
 
 			if (AppContext.perform_test_imputation) {
@@ -291,13 +347,15 @@ public class ExperimentRunner {
 				);
 			}
 
+			clearTestTrainProximityResults(); // these are intermediate proximities
+
 			ProximityForestResult result =
 					new ProximityForestResult(
 							forest
 					);
 
 			if (AppContext.isIsolationMode()) {
-				Path scorePath =
+				ScoreArtifact scoreArtifact =
 						handleIsolationScores(
 								forest,
 								test_data,
@@ -309,8 +367,17 @@ public class ExperimentRunner {
 				artifacts.put(
 						"testOutlierScores",
 						relativeArtifactPath(
-								scorePath
+								scoreArtifact.path()
 						)
+				);
+
+				addScoreArtifactResults(
+						scoreArtifact,
+						"testIsolationScore",
+						"testIsolationScoringMilliseconds",
+						additionalMetrics,
+						additionalCounts,
+						additionalTimings
 				);
 
 			} else {
@@ -365,14 +432,17 @@ public class ExperimentRunner {
 				}
 			}
 
-			result.collateResults();
+			//result.collateResults();
 
 			experimentResults.add(
 					buildExperimentResultRecord(
 							result,
 							datasetName,
 							repetition,
-							artifacts
+							artifacts,
+							additionalMetrics,
+							additionalCounts,
+							additionalTimings
 					)
 			);
 
@@ -494,7 +564,10 @@ public class ExperimentRunner {
 			ProximityForest forest,
 			int repetition,
 			String datasetName,
-			Map<String, String> artifacts
+			Map<String, String> artifacts,
+			Map<String, Double> additionalMetrics,
+			Map<String, Long> additionalCounts,
+			Map<String, Double> additionalTimings
 	) throws Exception {
 
 		if (AppContext.perform_test_imputation) {
@@ -512,7 +585,7 @@ public class ExperimentRunner {
 		}
 
 		if (AppContext.isIsolationMode()) {
-			Path scorePath =
+			ScoreArtifact scoreArtifact =
 					handleIsolationScores(
 							forest,
 							test_data,
@@ -524,18 +597,20 @@ public class ExperimentRunner {
 			artifacts.put(
 					"validationOutlierScores",
 					relativeArtifactPath(
-							scorePath
+							scoreArtifact.path()
 					)
 			);
 
-			ProximityForestResult isolationResult =
-					new ProximityForestResult(
-							forest
-					);
+			addScoreArtifactResults(
+					scoreArtifact,
+					"validationIsolationScore",
+					"validationIsolationScoringMilliseconds",
+					additionalMetrics,
+					additionalCounts,
+					additionalTimings
+			);
 
-			isolationResult.collateResults();
-
-			return isolationResult;
+			return forest.getResultSet();
 		}
 
 		if (AppContext.impute_test) {
@@ -675,7 +750,7 @@ public class ExperimentRunner {
 		);
 	}
 
-	private Path handleTrainingOutlierScores(
+	private ScoreArtifact handleTrainingOutlierScores(
 			ProximityForest forest,
 			int repetition
 	) throws Exception {
@@ -698,50 +773,53 @@ public class ExperimentRunner {
 			return null;
 		}
 
-		boolean originalSparseSetting =
-				AppContext.useSparseProximities;
+		ensureTrainingProximities(
+				forest
+		);
 
-		try {
-			System.out.println(
-					"Computing Training Proximities..."
-			);
+		System.out.println(
+				"Computing Training Outlier Scores..."
+		);
 
-			computeTrainProximities(
-					forest,
-					train_data
-			);
+		long start =
+				System.nanoTime();
 
-			System.out.println(
-					"Computing Training Outlier Scores..."
-			);
+		double[] scores =
+				OutlierScorer.getOutlierScores(
+						AppContext.useSparseProximities,
+						false,
+						true,
+						train_data._internal_class_array(),
+						AppContext.training_proximities,
+						AppContext.training_proximities_sparse
+				);
 
-			double[] scores =
-					OutlierScorer.getOutlierScores(
-							AppContext.useSparseProximities,
-							false,
-							true,
-							train_data._internal_class_array(),
-							AppContext.training_proximities,
-							AppContext.training_proximities_sparse
-					);
+		long end =
+				System.nanoTime();
 
-			Path outputPath =
-					outputPath(
-							repeatedFileName(
-									TRAINING_OUTLIER_SCORES,
-									repetition
-							)
-					);
+		Path outputPath =
+				outputPath(
+						repeatedFileName(
+								TRAINING_OUTLIER_SCORES,
+								repetition
+						)
+				);
 
-			return OutlierScoreWriter.write(
-					outputPath,
-					scores
-			);
+		Path writtenPath =
+				OutlierScoreWriter.write(
+						outputPath,
+						scores
+				);
 
-		} finally {
-			AppContext.useSparseProximities =
-					originalSparseSetting;
-		}
+		return new ScoreArtifact(
+				writtenPath,
+				summarizeScores(
+						scores
+				),
+				(
+						end - start
+				) / 1_000_000.0
+		);
 	}
 
 	private Map<String, Path> handleRequestedTrainingProximities(
@@ -760,29 +838,7 @@ public class ExperimentRunner {
 		 * If outlier scoring was not requested, no earlier operation is
 		 * guaranteed to have populated the requested proximity representation.
 		 */
-		if (!AppContext.get_training_outlier_scores) {
-			System.out.println(
-					"Computing Training Proximities..."
-			);
-
-			long start =
-					System.currentTimeMillis();
-
-			computeTrainProximities(
-					forest,
-					train_data
-			);
-
-			long end =
-					System.currentTimeMillis();
-
-			System.out.println(
-					"Done Computing Training Proximities. "
-							+ "Computation time: "
-							+ (end - start)
-							+ "ms"
-			);
-		}
+		ensureTrainingProximities(forest);
 
 		Path trainingPath;
 
@@ -852,7 +908,7 @@ public class ExperimentRunner {
 		return artifacts;
 	}
 
-	private Path handleIsolationScores(
+	private ScoreArtifact handleIsolationScores(
 			ProximityForest forest,
 			ListObjectDataset data,
 			int normalizationSampleSize,
@@ -860,12 +916,18 @@ public class ExperimentRunner {
 			int repetition
 	) throws Exception {
 
+		long start =
+				System.nanoTime();
+
 		double[] scores =
 				IsolationDepthScorer.score(
 						forest,
 						data,
 						normalizationSampleSize
 				);
+
+		long end =
+				System.nanoTime();
 
 		Path outputPath =
 				outputPath(
@@ -875,9 +937,20 @@ public class ExperimentRunner {
 						)
 				);
 
-		return OutlierScoreWriter.write(
-				outputPath,
-				scores
+		Path writtenPath =
+				OutlierScoreWriter.write(
+						outputPath,
+						scores
+				);
+
+		return new ScoreArtifact(
+				writtenPath,
+				summarizeScores(
+						scores
+				),
+				(
+						end - start
+				) / 1_000_000.0
 		);
 	}
 
@@ -959,7 +1032,10 @@ public class ExperimentRunner {
 			ProximityForestResult result,
 			String datasetName,
 			int repetition,
-			Map<String, String> artifacts
+			Map<String, String> artifacts,
+			Map<String, Double> additionalMetrics,
+			Map<String, Long> additionalCounts,
+			Map<String, Double> additionalTimings
 	) {
 		result.collateResults();
 
@@ -1000,6 +1076,30 @@ public class ExperimentRunner {
 						.addForestStatistic(
 								"numTrees",
 								result.total_num_trees
+						)
+						//.addConfiguration(
+						//		"numTrees",
+						//		AppContext.num_trees
+						//)
+						.addConfiguration(
+								"numCandidatesPerSplit",
+								AppContext.num_candidates_per_split
+						)
+						.addConfiguration(
+								"bootstrapTrees",
+								AppContext.bootstrap_trees
+						)
+						.addConfiguration(
+								"parallelTrees",
+								AppContext.parallelTrees
+						)
+						.addConfiguration(
+								"parallelSplitAssignments",
+								AppContext.parallel_split_assignments
+						)
+						.addConfiguration(
+								"parallelSplitAssignmentThreshold",
+								AppContext.parallel_split_assignment_threshold
 						)
 						.addForestStatistic(
 								"meanNodesPerTree",
@@ -1051,9 +1151,39 @@ public class ExperimentRunner {
 										? null
 										: AppContext.standardizationConfig.getScope()
 						)
+						.addMetrics(additionalMetrics)
+						.addCounts(additionalCounts)
 						.addArtifacts(
 								artifacts
 						);
+
+		if (additionalTimings != null) {
+			for (Map.Entry<String, Double> entry : additionalTimings.entrySet()) {
+				builder.addTimingMilliseconds(entry.getKey(), entry.getValue());
+			}
+		}
+
+		if (AppContext.isIsolationMode()) {
+			builder.addConfiguration(
+					"isolationNumBranches",
+					AppContext.isolation_num_branches
+			);
+
+			builder.addConfiguration(
+					"isolationMinLeafSize",
+					AppContext.isolation_min_leaf_size
+			);
+
+			builder.addConfiguration(
+					"isolationScoreMethod",
+					"pathLength"
+			);
+
+			builder.addConfiguration(
+					"purityMeasure",
+					AppContext.purity_measure
+			);
+		}
 
 		if (AppContext.isClassificationMode()) {
 			int total =
@@ -1768,5 +1898,250 @@ public class ExperimentRunner {
 					featureNames
 			);
 		}
+	}
+
+	private record NumericScoreSummary(
+			long count,
+			long nonfiniteCount,
+			double mean,
+			double populationStandardDeviation,
+			double minimum,
+			double maximum
+	) {
+	}
+
+	private record ScoreArtifact(
+			Path path,
+			NumericScoreSummary summary,
+			double computationMilliseconds
+	) {
+	}
+
+	private static NumericScoreSummary summarizeScores(
+			double[] scores
+	) {
+		if (scores == null || scores.length == 0) {
+			return new NumericScoreSummary(
+					0L,
+					0L,
+					Double.NaN,
+					Double.NaN,
+					Double.NaN,
+					Double.NaN
+			);
+		}
+
+		long count =
+				0L;
+
+		long nonfiniteCount =
+				0L;
+
+		double mean =
+				0.0;
+
+		double m2 =
+				0.0;
+
+		double minimum =
+				Double.POSITIVE_INFINITY;
+
+		double maximum =
+				Double.NEGATIVE_INFINITY;
+
+		for (double score : scores) {
+			if (!Double.isFinite(score)) {
+				nonfiniteCount++;
+				continue;
+			}
+
+			count++;
+
+			double delta =
+					score - mean;
+
+			mean +=
+					delta / count;
+
+			double updatedDelta =
+					score - mean;
+
+			m2 +=
+					delta * updatedDelta;
+
+			minimum =
+					Math.min(
+							minimum,
+							score
+					);
+
+			maximum =
+					Math.max(
+							maximum,
+							score
+					);
+		}
+
+		if (count == 0L) {
+			return new NumericScoreSummary(
+					0L,
+					nonfiniteCount,
+					Double.NaN,
+					Double.NaN,
+					Double.NaN,
+					Double.NaN
+			);
+		}
+
+		double populationVariance =
+				Math.max(
+						0.0,
+						m2
+				) / count;
+
+		return new NumericScoreSummary(
+				count,
+				nonfiniteCount,
+				mean,
+				Math.sqrt(
+						populationVariance
+				),
+				minimum,
+				maximum
+		);
+	}
+
+	private static void addScoreArtifactResults(
+			ScoreArtifact scoreArtifact,
+			String metricPrefix,
+			String timingName,
+			Map<String, Double> metrics,
+			Map<String, Long> counts,
+			Map<String, Double> timings
+	) {
+		if (scoreArtifact == null) {
+			return;
+		}
+
+		NumericScoreSummary summary =
+				scoreArtifact.summary();
+
+		counts.put(
+				metricPrefix + "Count",
+				summary.count()
+		);
+
+		counts.put(
+				metricPrefix + "NonfiniteCount",
+				summary.nonfiniteCount()
+		);
+
+		timings.put(
+				timingName,
+				scoreArtifact.computationMilliseconds()
+		);
+
+		if (summary.count() == 0L) {
+			return;
+		}
+
+		metrics.put(
+				metricPrefix + "Mean",
+				summary.mean()
+		);
+
+		metrics.put(
+				metricPrefix
+						+ "PopulationStandardDeviation",
+				summary.populationStandardDeviation()
+		);
+
+		metrics.put(
+				metricPrefix + "Minimum",
+				summary.minimum()
+		);
+
+		metrics.put(
+				metricPrefix + "Maximum",
+				summary.maximum()
+		);
+	}
+
+	private boolean trainingProximitiesAvailable() {
+		if (AppContext.useSparseProximities) {
+			return AppContext.training_proximities_sparse
+					!= null;
+		}
+
+		return AppContext.training_proximities
+				!= null;
+	}
+
+	private void ensureTrainingProximities(
+			ProximityForest forest
+	) throws IOException,
+			ExecutionException,
+			InterruptedException {
+
+		if (trainingProximitiesAvailable()) {
+			return;
+		}
+
+		System.out.println(
+				"Computing Training Proximities..."
+		);
+
+		long start =
+				System.nanoTime();
+
+		computeTrainProximities(
+				forest,
+				train_data
+		);
+
+		long elapsedMilliseconds =
+				(
+						System.nanoTime()
+								- start
+				) / 1_000_000L;
+
+		System.out.println(
+				"Done Computing Training Proximities. "
+						+ "Computation time: "
+						+ elapsedMilliseconds
+						+ "ms"
+		);
+
+		if (!trainingProximitiesAvailable()) {
+			throw new IllegalStateException(
+					AppContext.useSparseProximities
+							? "Training proximity computation completed, but "
+							+ "the sparse proximity map remains null."
+							: "Training proximity computation completed, but "
+							+ "the dense proximity matrix remains null."
+			);
+		}
+	}
+
+	private void clearProximityResults() {
+		AppContext.training_proximities =
+				null;
+
+		AppContext.training_proximities_sparse =
+				null;
+
+		AppContext.testing_training_proximities =
+				null;
+
+		AppContext.testing_training_proximities_sparse =
+				null;
+	}
+
+	private void clearTestTrainProximityResults() {
+		AppContext.testing_training_proximities =
+				null;
+
+		AppContext.testing_training_proximities_sparse =
+				null;
 	}
 }

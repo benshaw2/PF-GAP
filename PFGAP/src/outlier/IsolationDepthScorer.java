@@ -1,29 +1,27 @@
 package outlier;
 
+import core.AppContext;
 import datasets.ListObjectDataset;
+import datasets.readers.lazy.LazySeriesRef;
 import trees.ProximityForest;
 import trees.ProximityTree;
 
-public class IsolationDepthScorer {
+import java.util.Random;
+
+/**
+ * Isolation-Forest-style path-length scoring for proximity forests.
+ *
+ * <p>Higher scores indicate stronger anomalous or outlying behavior.</p>
+ */
+public final class IsolationDepthScorer {
 
     private IsolationDepthScorer() {
-        // Utility class
+        // Utility class.
     }
 
     /**
-     * Compute Isolation-Forest-style anomaly scores for all instances in a dataset.
-     *
-     * Higher scores indicate stronger outlier/anomaly behavior.
-     *
-     * Score formula:
-     *
-     *     score(x) = 2 ^ ( - averagePathLength(x) / c(n) )
-     *
-     * where c(n) is the standard expected path length correction.
-     *
-     * @param forest trained proximity forest in isolation mode
-     * @param data dataset to score
-     * @return anomaly scores, one per instance
+     * Computes anomaly scores using the scored dataset size as the
+     * normalization size.
      */
     public static double[] score(
             ProximityForest forest,
@@ -31,23 +29,21 @@ public class IsolationDepthScorer {
     ) throws Exception {
 
         if (data == null) {
-            return new double[]{};
+            return new double[0];
         }
 
-        return score(forest, data, data.size());
+        return score(
+                forest,
+                data,
+                data.size()
+        );
     }
 
     /**
-     * Compute Isolation-Forest-style anomaly scores with an explicit
-     * normalization sample size.
+     * Computes anomaly scores with an explicit normalization sample size.
      *
-     * For training scores, normalizationSampleSize is usually the training size.
-     * For test scores, use the original training size when available.
-     *
-     * @param forest trained proximity forest in isolation mode
-     * @param data dataset to score
-     * @param normalizationSampleSize sample size used in c(n)
-     * @return anomaly scores, one per instance
+     * <p>For test scoring, normalizationSampleSize should normally be the
+     * training sample size rather than the number of test instances.</p>
      */
     public static double[] score(
             ProximityForest forest,
@@ -55,34 +51,58 @@ public class IsolationDepthScorer {
             int normalizationSampleSize
     ) throws Exception {
 
-        if (forest == null) {
-            throw new IllegalArgumentException("forest cannot be null.");
-        }
+        validateForest(
+                forest
+        );
 
         if (data == null) {
-            return new double[]{};
+            return new double[0];
         }
 
-        double[] scores = new double[data.size()];
+        double[] scores =
+                new double[data.size()];
 
-        for (int i = 0; i < data.size(); i++) {
-            scores[i] = scoreSeries(
-                    forest,
-                    data.get_series(i),
-                    normalizationSampleSize
-            );
+        double normalizer =
+                correction(
+                        normalizationSampleSize
+                );
+
+        for (int index = 0;
+             index < data.size();
+             index++) {
+
+            Object storedSeries =
+                    data.get_series(
+                            index
+                    );
+
+            Object resolvedSeries =
+                    resolveSeries(
+                            storedSeries
+                    );
+
+            double averagePathLength =
+                    averagePathLengthResolved(
+                            forest,
+                            resolvedSeries,
+                            stableInstanceIdentity(
+                                    data,
+                                    index
+                            )
+                    );
+
+            scores[index] =
+                    scoreFromPathLength(
+                            averagePathLength,
+                            normalizer
+                    );
         }
 
         return scores;
     }
 
     /**
-     * Compute the anomaly score for a single series.
-     *
-     * @param forest trained proximity forest
-     * @param series query series
-     * @param normalizationSampleSize sample size used in c(n)
-     * @return anomaly score
+     * Computes an anomaly score for one stored or materialized series.
      */
     public static double scoreSeries(
             ProximityForest forest,
@@ -90,132 +110,342 @@ public class IsolationDepthScorer {
             int normalizationSampleSize
     ) throws Exception {
 
-        double averagePathLength = averagePathLength(forest, series);
-        double normalizer = correction(normalizationSampleSize);
+        validateForest(
+                forest
+        );
 
+        Object resolvedSeries =
+                resolveSeries(
+                        series
+                );
+
+        double averagePathLength =
+                averagePathLengthResolved(
+                        forest,
+                        resolvedSeries,
+                        0
+                );
+
+        return scoreFromPathLength(
+                averagePathLength,
+                correction(
+                        normalizationSampleSize
+                )
+        );
+    }
+
+    private static double scoreFromPathLength(
+            double averagePathLength,
+            double normalizer
+    ) {
         if (normalizer <= 0.0) {
-            return averagePathLength <= 0.0 ? 1.0 : 0.0;
+            return averagePathLength <= 0.0
+                    ? 1.0
+                    : 0.0;
         }
 
-        return Math.pow(2.0, -averagePathLength / normalizer);
+        return Math.pow(
+                2.0,
+                -averagePathLength / normalizer
+        );
     }
 
     /**
-     * Compute average corrected path length across the trees.
-     *
-     * @param forest trained proximity forest
-     * @param series query series
-     * @return average corrected path length
+     * Computes average corrected path length for one stored or materialized
+     * series.
      */
     public static double averagePathLength(
             ProximityForest forest,
             Object series
     ) throws Exception {
 
-        ProximityTree[] trees = forest.getTrees();
+        validateForest(
+                forest
+        );
 
-        if (trees == null || trees.length == 0) {
-            throw new IllegalStateException(
-                    "Cannot compute isolation score: forest has no trees."
-            );
-        }
-
-        double total = 0.0;
-        int count = 0;
-
-        for (ProximityTree tree : trees) {
-
-            if (tree == null || tree.getRootNode() == null) {
-                continue;
-            }
-
-            total += pathLength(tree, series);
-            count++;
-        }
-
-        if (count == 0) {
-            throw new IllegalStateException(
-                    "Cannot compute isolation score: forest has no valid trees."
-            );
-        }
-
-        return total / count;
+        return averagePathLengthResolved(
+                forest,
+                resolveSeries(
+                        series
+                ),
+                0
+        );
     }
 
     /**
-     * Compute corrected path length for one tree.
+     * Computes average corrected path length for an already materialized
+     * series.
      *
-     * The returned path length is:
-     *
-     *     depth(leaf) + c(leafSize)
-     *
-     * where leafSize is the number of in-bag training instances reaching
-     * the terminal node.
-     *
-     * @param tree trained proximity tree
-     * @param series query series
-     * @return corrected path length
+     * <p>The series is reused across every tree and is not reread at each
+     * node.</p>
+     */
+    public static double averagePathLengthResolved(
+            ProximityForest forest,
+            Object resolvedSeries,
+            int instanceIdentity
+    ) throws Exception {
+
+        validateForest(
+                forest
+        );
+
+        if (resolvedSeries == null) {
+            throw new IllegalArgumentException(
+                    "Resolved series cannot be null."
+            );
+        }
+
+        if (resolvedSeries instanceof LazySeriesRef) {
+            throw new IllegalArgumentException(
+                    "averagePathLengthResolved() received a "
+                            + "LazySeriesRef."
+            );
+        }
+
+        ProximityTree[] trees =
+                forest.getTrees();
+
+        double total =
+                0.0;
+
+        int validTreeCount =
+                0;
+
+        for (ProximityTree tree : trees) {
+            if (tree == null
+                    || tree.getRootNode() == null) {
+
+                continue;
+            }
+
+            total +=
+                    pathLengthResolved(
+                            tree,
+                            resolvedSeries,
+                            new Random(
+                                    mixSeed(
+                                            instanceIdentity,
+                                            tree.getTreeID()
+                                    )
+                            )
+                    );
+
+            validTreeCount++;
+        }
+
+        if (validTreeCount == 0) {
+            throw new IllegalStateException(
+                    "Cannot compute isolation score: "
+                            + "forest has no valid trees."
+            );
+        }
+
+        return total / validTreeCount;
+    }
+
+    /**
+     * Compatibility path-length method for stored or eager input.
      */
     public static double pathLength(
             ProximityTree tree,
             Object series
     ) throws Exception {
 
-        ProximityTree.Node node = tree.getRootNode();
+        return pathLengthResolved(
+                tree,
+                resolveSeries(
+                        series
+                ),
+                new Random(
+                        mixSeed(
+                                0,
+                                tree == null
+                                        ? 0
+                                        : tree.getTreeID()
+                        )
+                )
+        );
+    }
+
+    /**
+     * Computes corrected path length for one tree using an already
+     * materialized series.
+     */
+    public static double pathLengthResolved(
+            ProximityTree tree,
+            Object resolvedSeries,
+            Random random
+    ) throws Exception {
+
+        if (tree == null) {
+            throw new IllegalArgumentException(
+                    "tree cannot be null."
+            );
+        }
+
+        if (resolvedSeries == null) {
+            throw new IllegalArgumentException(
+                    "Resolved series cannot be null."
+            );
+        }
+
+        ProximityTree.Node node =
+                tree.getRootNode();
 
         if (node == null) {
             return 0.0;
         }
 
-        int depth = 0;
+        int depth =
+                0;
 
         while (!node.is_leaf()) {
+            if (node.getSplitter() == null
+                    || node.get_children() == null) {
 
-            if (node.getSplitter() == null || node.get_children() == null) {
                 break;
             }
 
-            int branch = node.getSplitter().find_closest_branch(series);
-            ProximityTree.Node[] children = node.get_children();
+            int branch =
+                    node.getSplitter()
+                            .findClosestBranchResolved(
+                                    resolvedSeries,
+                                    random
+                            );
 
-            if (branch < 0 || branch >= children.length || children[branch] == null) {
+            ProximityTree.Node[] children =
+                    node.get_children();
+
+            if (branch < 0
+                    || branch >= children.length
+                    || children[branch] == null) {
+
                 break;
             }
 
-            node = children[branch];
+            node =
+                    children[branch];
+
             depth++;
         }
 
-        int leafSize = leafSize(node);
-
-        return depth + correction(leafSize);
+        return depth
+                + correction(
+                leafSize(
+                        node
+                )
+        );
     }
 
-    /**
-     * Get the leaf size used for the path length correction.
-     *
-     * @param node terminal node
-     * @return number of in-bag instances in the leaf, at least 1
-     */
-    private static int leafSize(ProximityTree.Node node) {
+    private static Object resolveSeries(
+            Object series
+    ) {
+        if (series == null) {
+            throw new IllegalArgumentException(
+                    "Series cannot be null."
+            );
+        }
 
-        if (node == null || node.getInBagIndices() == null) {
+        if (series instanceof LazySeriesRef reference) {
+            return AppContext.readLazySeries(
+                    reference
+            );
+        }
+
+        return series;
+    }
+
+    private static void validateForest(
+            ProximityForest forest
+    ) {
+        if (forest == null) {
+            throw new IllegalArgumentException(
+                    "forest cannot be null."
+            );
+        }
+
+        ProximityTree[] trees =
+                forest.getTrees();
+
+        if (trees == null || trees.length == 0) {
+            throw new IllegalStateException(
+                    "Cannot compute isolation score: "
+                            + "forest has no trees."
+            );
+        }
+    }
+
+    private static int stableInstanceIdentity(
+            ListObjectDataset data,
+            int localIndex
+    ) {
+        Integer originalIndex =
+                data.get_index(
+                        localIndex
+                );
+
+        return originalIndex == null
+                ? localIndex
+                : originalIndex;
+    }
+
+    private static long mixSeed(
+            int instanceIdentity,
+            int treeIdentity
+    ) {
+        long value =
+                0x9E3779B97F4A7C15L;
+
+        value ^=
+                0xBF58476D1CE4E5B9L
+                        * (
+                        instanceIdentity + 1L
+                );
+
+        value ^=
+                0x94D049BB133111EBL
+                        * (
+                        treeIdentity + 1L
+                );
+
+        value =
+                (value ^ (value >>> 30))
+                        * 0xBF58476D1CE4E5B9L;
+
+        value =
+                (value ^ (value >>> 27))
+                        * 0x94D049BB133111EBL;
+
+        return value
+                ^ (value >>> 31);
+    }
+
+    private static int leafSize(
+            ProximityTree.Node node
+    ) {
+        if (node == null
+                || node.getInBagIndices() == null) {
+
             return 1;
         }
 
-        return Math.max(1, node.getInBagIndices().size());
+        return Math.max(
+                1,
+                node.getInBagIndices()
+                        .size()
+        );
     }
 
     /**
-     * Standard Isolation Forest path length correction.
+     * Standard Isolation Forest path-length correction:
      *
-     *     c(n) = 2 H(n - 1) - 2(n - 1)/n
-     *
-     * @param n sample size
-     * @return expected path length correction
+     * <pre>
+     * c(n) = 2 H(n - 1) - 2(n - 1)/n
+     * </pre>
      */
-    public static double correction(int n) {
-
+    public static double correction(
+            int n
+    ) {
         if (n <= 1) {
             return 0.0;
         }
@@ -224,15 +454,31 @@ public class IsolationDepthScorer {
             return 1.0;
         }
 
-        return 2.0 * harmonic(n - 1) - (2.0 * (n - 1) / n);
+        return 2.0
+                * harmonic(
+                n - 1
+        )
+                - (
+                2.0
+                        * (
+                        n - 1
+                )
+                        / n
+        );
     }
 
-    private static double harmonic(int n) {
+    private static double harmonic(
+            int n
+    ) {
+        double sum =
+                0.0;
 
-        double sum = 0.0;
+        for (int value = 1;
+             value <= n;
+             value++) {
 
-        for (int i = 1; i <= n; i++) {
-            sum += 1.0 / i;
+            sum +=
+                    1.0 / value;
         }
 
         return sum;
