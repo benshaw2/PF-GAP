@@ -73,6 +73,7 @@ public final class LazyCustomPerFileReader
     private final String filePattern;
     private final String customReaderDescriptor;
     private final Map<String, String> customReaderParameters;
+    private final List<String> featureColumns;
 
     private final boolean isTest;
     private final boolean isRegression;
@@ -96,6 +97,7 @@ public final class LazyCustomPerFileReader
                 options.getFilePattern(),
                 options.getCustomReaderDescriptor(),
                 options.getCustomReaderParameters(),
+                options.getFeatureColumns(),
                 options.isTest(),
                 options.isRegression(),
                 options.isNumeric(),
@@ -127,6 +129,7 @@ public final class LazyCustomPerFileReader
                 filePattern,
                 customReaderDescriptor,
                 customReaderParameters,
+                List.of(),
                 isTest,
                 isRegression,
                 isNumeric,
@@ -153,44 +156,16 @@ public final class LazyCustomPerFileReader
      *                                permitted
      * @param readerKey               lazy-reader registry key
      */
-    public LazyCustomPerFileReader(
-            String dataPath,
-            String filePattern,
-            String customReaderDescriptor,
-            Map<String, String> customReaderParameters,
-            boolean isTest,
-            boolean isRegression,
-            boolean isNumeric,
-            boolean hasMissingValues,
-            boolean customReaderThreadSafe,
-            String readerKey
-    ) {
-        this(
-                dataPath,
-                filePattern,
-                customReaderDescriptor,
-                customReaderParameters,
-                isTest,
-                isRegression,
-                isNumeric,
-                hasMissingValues,
-                customReaderThreadSafe,
-                null,
-                readerKey
-        );
-    }
-
     /**
-     * Full constructor including optional prepared standardization statistics.
-     *
-     * @param standardizationStats prepared statistics applied by PFGAP after
-     *                             each lazy custom materialization, or null
+     * Full constructor including feature metadata and optional prepared
+     * standardization statistics.
      */
     public LazyCustomPerFileReader(
             String dataPath,
             String filePattern,
             String customReaderDescriptor,
             Map<String, String> customReaderParameters,
+            List<String> featureColumns,
             boolean isTest,
             boolean isRegression,
             boolean isNumeric,
@@ -221,6 +196,13 @@ public final class LazyCustomPerFileReader
                         customReaderParameters
                 );
 
+        this.featureColumns =
+                featureColumns == null
+                        ? List.of()
+                        : List.copyOf(
+                        featureColumns
+                );
+
         this.isTest =
                 isTest;
 
@@ -242,6 +224,14 @@ public final class LazyCustomPerFileReader
             );
         }
 
+        if (standardizationStats != null
+                && !this.featureColumns.isEmpty()) {
+
+            standardizationStats.validateFeatureCompatibility(
+                    this.featureColumns
+            );
+        }
+
         this.standardizationStats =
                 standardizationStats;
 
@@ -250,6 +240,63 @@ public final class LazyCustomPerFileReader
                         readerKey,
                         "readerKey"
                 );
+    }
+
+    public LazyCustomPerFileReader(
+            String dataPath,
+            String filePattern,
+            String customReaderDescriptor,
+            Map<String, String> customReaderParameters,
+            boolean isTest,
+            boolean isRegression,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            boolean customReaderThreadSafe,
+            String readerKey
+    ) {
+        this(
+                dataPath,
+                filePattern,
+                customReaderDescriptor,
+                customReaderParameters,
+                List.of(),
+                isTest,
+                isRegression,
+                isNumeric,
+                hasMissingValues,
+                customReaderThreadSafe,
+                null,
+                readerKey
+        );
+    }
+
+    public LazyCustomPerFileReader(
+            String dataPath,
+            String filePattern,
+            String customReaderDescriptor,
+            Map<String, String> customReaderParameters,
+            boolean isTest,
+            boolean isRegression,
+            boolean isNumeric,
+            boolean hasMissingValues,
+            boolean customReaderThreadSafe,
+            StandardizationStats standardizationStats,
+            String readerKey
+    ) {
+        this(
+                dataPath,
+                filePattern,
+                customReaderDescriptor,
+                customReaderParameters,
+                List.of(),
+                isTest,
+                isRegression,
+                isNumeric,
+                hasMissingValues,
+                customReaderThreadSafe,
+                standardizationStats,
+                readerKey
+        );
     }
 
     /**
@@ -290,7 +337,7 @@ public final class LazyCustomPerFileReader
                         readerKey,
                         ReaderType.LAZY_PER_FILE_CUSTOM,
                         null,
-                        List.of(),
+                        featureColumns,
                         isNumeric,
                         hasMissingValues,
                         null,

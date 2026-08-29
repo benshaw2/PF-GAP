@@ -132,6 +132,7 @@ public final class LazySeriesReaderFactory {
                         spec.isCustomReaderRegression(),
                         spec.isNumeric(),
                         spec.hasMissingValues(),
+                        spec.getFeatureColumns(),
                         spec.getCustomReaderParameters()
                 );
 
