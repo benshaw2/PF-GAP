@@ -8,18 +8,10 @@
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/application/PFApplication.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/application/PFApplication.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/AppContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/AppContext.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NumericLongFormatReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NumericLongFormatReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileDelimitedReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileDelimitedReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileParquetReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileParquetReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/ParquetColumnSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/ParquetColumnSeriesReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/PerFileDelimitedSeriesReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/api/CustomSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/api/CustomSeriesReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyCustomPerFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyCustomPerFileReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderFactory.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderFactory.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/preprocessing/standardization/OnlineMoments.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/preprocessing/standardization/OnlineMoments.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/preprocessing/standardization/StandardizationFitter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/preprocessing/standardization/StandardizationFitter.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/preprocessing/standardization/Standardizer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/preprocessing/standardization/Standardizer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileDelimitedSeriesReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/NumericPerFileDelimitedSeriesReader.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

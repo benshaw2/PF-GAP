@@ -472,6 +472,9 @@ public class ExperimentRunner {
 				.setHdf5DatasetPath(AppContext.hdf5_dataset_path)
 				.setHdf5LabelDatasetPath(AppContext.hdf5_label_dataset_path)
 				.setFilePattern(filePattern)
+				.setCustomReaderDescriptor(AppContext.customReaderDescriptor)
+				.setCustomReaderParameters(AppContext.customReaderParameters)
+				.setCustomReaderThreadSafe(AppContext.customReaderThreadSafe)
 				.setStandardizationStats(AppContext.standardizationStats);
 	}
 

@@ -19,33 +19,33 @@ import preprocessing.standardization.StandardizationStats;
 import proximities.ProximityType;
 
 /**
- * 
+ *
  * @author shifaz
  * @email ahmed.shifaz@monash.edu
  *
  */
 
 public class AppContext {
-	
+
 	private static final long serialVersionUID = -502980220452234173L;
 	public static final String version = "1.0.0";
-	
-	public static final int ONE_MB = 1048576;	
-	public static final String TIMESTAMP_FORMAT_LONG = "yyyy-MM-dd HH:mm:ss.SSS";	
-	public static final String TIMESTAMP_FORMAT_SHORT = "HH:mm:ss.SSS";	
-	
-	
+
+	public static final int ONE_MB = 1048576;
+	public static final String TIMESTAMP_FORMAT_LONG = "yyyy-MM-dd HH:mm:ss.SSS";
+	public static final String TIMESTAMP_FORMAT_SHORT = "HH:mm:ss.SSS";
+
+
 	//********************************************************************
 	//DEVELOPMENT and TESTING AREA -- 
 	public static boolean config_majority_vote_tie_break_randomly = true;
 	public static boolean config_skip_distance_when_exemplar_matches_query = true;
-	public static boolean config_use_random_choice_when_min_distance_is_equal = true;	
+	public static boolean config_use_random_choice_when_min_distance_is_equal = true;
 	//********************************************************************
-	
+
 	//DEFAULT SETTINGS, these are overridden by command line arguments
 	//public static long rand_seed;	//TODO set seed to reproduce results
 	//public static Random rand;
-	
+
 	public static int verbosity = 0; //0, 1, 2 
 	public static int export_level = 1; //0, 1, 2 
 
@@ -64,6 +64,12 @@ public class AppContext {
 	// HDF5
 	public static String hdf5_dataset_path = "/X";
 	public static String hdf5_label_dataset_path = "/y";
+
+	// Custom per-file reader plugin configuration. This is separate from
+	// Descriptors, which stores custom distance descriptors.
+	public static String customReaderDescriptor = null;
+	public static Map<String, String> customReaderParameters = new LinkedHashMap<>();
+	public static boolean customReaderThreadSafe = false;
 
 	public static boolean is2D = false; // this becomes true for multiTS and (probably) graph data.
 	public static boolean isNumeric = true; // TODO: write distances for string, boolean, date types.
@@ -108,12 +114,12 @@ public class AppContext {
 	public static int num_candidates_per_split = 1;
 	public static boolean random_dm_per_node = true;
 	public static boolean shuffle_dataset = false;
-		
+
 	public static boolean warmup_java = false;
-	public static boolean garbage_collect_after_each_repetition = true;	
-	
+	public static boolean garbage_collect_after_each_repetition = true;
+
 	public static int print_test_progress_for_each_instances = 100;
-	
+
 	// These distances are the default when none are specified.
 	public static MEASURE[] enabled_distance_measures = new MEASURE[] {
 			MEASURE.euclidean,
@@ -127,10 +133,10 @@ public class AppContext {
 			MEASURE.erp,
 			MEASURE.twe,
 			MEASURE.msm
-	};	
+	};
 
 	public static Runtime runtime = Runtime.getRuntime();
-    public static boolean savemodel;
+	public static boolean savemodel;
 	public static boolean getprox;
 	public static boolean get_training_outlier_scores;
 	public static boolean get_predictions = false;

@@ -16,6 +16,25 @@ def _list_arg(values):
     return "[" + ",".join(str(v) for v in values) + "]"
 
 
+def _custom_reader_parameters_arg(parameters):
+    if parameters is None:
+        return None
+    if isinstance(parameters, str):
+        return parameters
+    if not isinstance(parameters, dict):
+        raise TypeError("custom_reader_parameters must be a dict, string, or None.")
+    parts = []
+    for name, value in parameters.items():
+        name = str(name).strip()
+        if not name or ";" in name or "=" in name:
+            raise ValueError("Custom-reader parameter names cannot be blank or contain ';' or '='.")
+        text = "" if value is None else str(value).strip()
+        if ";" in text:
+            raise ValueError("Custom-reader parameter values cannot contain ';'.")
+        parts.append(f"{name}={text}")
+    return ";".join(parts)
+
+
 def _separator_arg(value):
     if value == "\t":
         return "\\t"
@@ -163,6 +182,9 @@ def train(
     hdf5_dataset_path="/X",
     hdf5_label_dataset_path="/y",
     file_pattern=None,
+    custom_reader_descriptor=None,
+    custom_reader_parameters=None,
+    custom_reader_thread_safe=False,
     
     # Standardization controls
     standardization="none",
@@ -313,6 +335,10 @@ def train(
     
     _append_if_not_none(msgList, "reader_type", reader_type)
     _append_if_not_none(msgList, "file_pattern", file_pattern)
+    _append_if_not_none(msgList, "custom_reader_descriptor", custom_reader_descriptor)
+    encoded_custom_reader_parameters = _custom_reader_parameters_arg(custom_reader_parameters)
+    _append_if_not_none(msgList, "custom_reader_parameters", encoded_custom_reader_parameters)
+    msgList.append("-custom_reader_thread_safe=" + _bool(custom_reader_thread_safe))
     _append_if_not_none(msgList, "id_column", id_column)
     _append_if_not_none(msgList, "time_column", time_column)
 
@@ -364,6 +390,9 @@ def predict(
     array_separator=":",
     reader_type=None,
     file_pattern=None,
+    custom_reader_descriptor=None,
+    custom_reader_parameters=None,
+    custom_reader_thread_safe=False,
     id_column=None,
     time_column=None,
     feature_columns=None,
@@ -473,6 +502,10 @@ def predict(
     
     _append_if_not_none(msgList, "reader_type", reader_type)
     _append_if_not_none(msgList, "file_pattern", file_pattern)
+    _append_if_not_none(msgList, "custom_reader_descriptor", custom_reader_descriptor)
+    encoded_custom_reader_parameters = _custom_reader_parameters_arg(custom_reader_parameters)
+    _append_if_not_none(msgList, "custom_reader_parameters", encoded_custom_reader_parameters)
+    msgList.append("-custom_reader_thread_safe=" + _bool(custom_reader_thread_safe))
     _append_if_not_none(msgList, "id_column", id_column)
     _append_if_not_none(msgList, "time_column", time_column)
 
