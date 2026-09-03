@@ -934,6 +934,10 @@ public class ProximityTree
 					multiplicities;
 		}
 
+		public int getNodeDepth() {
+			return node_depth;
+		}
+
 		public Map<Integer, Integer> getMultiplicities() {
 			return multiplicities;
 		}

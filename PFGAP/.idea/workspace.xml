@@ -8,10 +8,11 @@
   <component name="ChangeListManager">
     <list default="true" id="e79f6ef2-7fc5-4faa-a34e-54a90b1676fa" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/CustomPerFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/CustomPerFileReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/api/CustomReaderContext.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/api/CustomReaderContext.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyCustomPerFileReader.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazyCustomPerFileReader.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderFactory.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/datasets/readers/lazy/LazySeriesReaderFactory.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/core/ExperimentRunner.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/core/ExperimentRunner.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/outlier/IsolationDepthScorer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/outlier/IsolationDepthScorer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/preprocessing/standardization/StandardizationFitter.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/preprocessing/standardization/StandardizationFitter.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/preprocessing/standardization/Standardizer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/preprocessing/standardization/Standardizer.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/trees/ProximityTree.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/trees/ProximityTree.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

@@ -347,7 +347,7 @@ public class ExperimentRunner {
 
 			if (AppContext.isIsolationMode()) {
 				ScoreArtifact scoreArtifact =
-						handleIsolationScores(
+						handleInferenceIsolationScores(
 								forest,
 								test_data,
 								trainData.size(),
@@ -580,7 +580,7 @@ public class ExperimentRunner {
 
 		if (AppContext.isIsolationMode()) {
 			ScoreArtifact scoreArtifact =
-					handleIsolationScores(
+					handleInferenceIsolationScores(
 							forest,
 							test_data,
 							train_data.size(),
@@ -754,10 +754,10 @@ public class ExperimentRunner {
 		}
 
 		if (AppContext.isIsolationMode()) {
-			return handleIsolationScores(
+			return handleTrainingIsolationScores(
 					forest,
 					train_data,
-					train_data.size(),
+					//train_data.size(),
 					TRAINING_OUTLIER_SCORES,
 					repetition
 			);
@@ -902,7 +902,63 @@ public class ExperimentRunner {
 		return artifacts;
 	}
 
-	private ScoreArtifact handleIsolationScores(
+	/**
+	 * Computes isolation scores for the original training data using only
+	 * stored terminal-node memberships.
+	 *
+	 * <p>This path does not materialize series, invoke splitters, or compute
+	 * distances.</p>
+	 */
+	private ScoreArtifact handleTrainingIsolationScores(
+			ProximityForest forest,
+			ListObjectDataset trainingData,
+			String baseFileName,
+			int repetition
+	) throws IOException {
+
+		if (trainingData == null) {
+			throw new IllegalArgumentException(
+					"Training data cannot be null when computing "
+							+ "training isolation scores."
+			);
+		}
+
+		if (AppContext.verbosity > 0) {
+			System.out.println(
+					"Computing Training Isolation Scores "
+							+ "from stored tree topology..."
+			);
+		}
+
+		long start =
+				System.nanoTime();
+
+		double[] scores =
+				IsolationDepthScorer.scoreTraining(
+						forest,
+						trainingData
+				);
+
+		long end =
+				System.nanoTime();
+
+		return writeIsolationScoreArtifact(
+				scores,
+				start,
+				end,
+				baseFileName,
+				repetition
+		);
+	}
+
+	/**
+	 * Computes isolation scores for validation, test, or otherwise unseen data
+	 * by routing each instance through every tree.
+	 *
+	 * <p>This path invokes trained splitters and can therefore compute expensive
+	 * distances such as DTW.</p>
+	 */
+	private ScoreArtifact handleInferenceIsolationScores(
 			ProximityForest forest,
 			ListObjectDataset data,
 			int normalizationSampleSize,
@@ -910,11 +966,25 @@ public class ExperimentRunner {
 			int repetition
 	) throws Exception {
 
+		if (data == null) {
+			throw new IllegalArgumentException(
+					"Inference data cannot be null when computing "
+							+ "isolation scores."
+			);
+		}
+
+		if (AppContext.verbosity > 0) {
+			System.out.println(
+					"Computing Inference Isolation Scores "
+							+ "by routing instances through the forest..."
+			);
+		}
+
 		long start =
 				System.nanoTime();
 
 		double[] scores =
-				IsolationDepthScorer.score(
+				IsolationDepthScorer.scoreInference(
 						forest,
 						data,
 						normalizationSampleSize
@@ -922,6 +992,30 @@ public class ExperimentRunner {
 
 		long end =
 				System.nanoTime();
+
+		return writeIsolationScoreArtifact(
+				scores,
+				start,
+				end,
+				baseFileName,
+				repetition
+		);
+	}
+
+	/**
+	 * Writes a previously computed isolation-score array and packages its
+	 * summary and computation timing.
+	 *
+	 * <p>The reported computation time excludes file output and summary
+	 * calculation.</p>
+	 */
+	private ScoreArtifact writeIsolationScoreArtifact(
+			double[] scores,
+			long computationStart,
+			long computationEnd,
+			String baseFileName,
+			int repetition
+	) throws IOException {
 
 		Path outputPath =
 				outputPath(
@@ -943,7 +1037,7 @@ public class ExperimentRunner {
 						scores
 				),
 				(
-						end - start
+						computationEnd - computationStart
 				) / 1_000_000.0
 		);
 	}
