@@ -11,6 +11,7 @@ import preprocessing.standardization.StandardizationMethod;
 import preprocessing.standardization.StandardizationScope;
 import preprocessing.standardization.VarianceConvention;
 import proximities.ProximityType;
+import trees.DimensionSelectionStrategy;
 import util.GeneralUtilities;
 import util.PrintUtilities;
 
@@ -158,6 +159,110 @@ public class PFApplication {
 							+ ". Valid options are: "
 							+ Arrays.toString(ReaderType.values())
 			);
+		}
+	}
+
+	/**
+	 * Parses a node-level dimension-selection strategy.
+	 */
+	private static DimensionSelectionStrategy parseDimensionSelectionStrategy(
+			String raw
+	) {
+		if (raw == null || raw.isBlank()) {
+			throw new IllegalArgumentException(
+					"dimension_selection_strategy cannot be null or blank."
+			);
+		}
+
+		try {
+			return DimensionSelectionStrategy.valueOf(
+					raw.trim()
+							.toUpperCase(
+									Locale.ROOT
+							)
+			);
+		} catch (IllegalArgumentException exception) {
+			throw new IllegalArgumentException(
+					"Invalid dimension_selection_strategy: "
+							+ raw
+							+ ". Valid options are: "
+							+ Arrays.toString(
+							DimensionSelectionStrategy.values()
+					),
+					exception
+			);
+		}
+	}
+
+	/**
+	 * Validates node-level dimension-subsampling configuration after all
+	 * command-line arguments have been parsed.
+	 *
+	 * <p>Strategy-specific numeric values are ignored when dimension
+	 * subsampling is disabled or when the ALL strategy is selected.</p>
+	 */
+	private static void validateDimensionSelectionConfiguration() {
+		if (AppContext.dimension_selection_strategy == null) {
+			throw new IllegalArgumentException(
+					"dimension_selection_strategy cannot be null."
+			);
+		}
+
+		if (!AppContext.subsample_dimensions
+				|| AppContext.dimension_selection_strategy
+				== DimensionSelectionStrategy.ALL) {
+
+			return;
+		}
+
+		switch (AppContext.dimension_selection_strategy) {
+			case SQRT:
+			case LOG2:
+				return;
+
+			case FIXED_COUNT:
+				if (AppContext.dimension_selection_count < 1) {
+					throw new IllegalArgumentException(
+							"dimension_selection_count must be positive when "
+									+ "dimension_selection_strategy=FIXED_COUNT, "
+									+ "but received "
+									+ AppContext.dimension_selection_count
+									+ "."
+					);
+				}
+
+				return;
+
+			case PROPORTION:
+				double proportion =
+						AppContext.dimension_selection_proportion;
+
+				if (!Double.isFinite(
+						proportion
+				)
+						|| proportion <= 0.0
+						|| proportion > 1.0) {
+
+					throw new IllegalArgumentException(
+							"dimension_selection_proportion must be finite and "
+									+ "within (0, 1] when "
+									+ "dimension_selection_strategy=PROPORTION, "
+									+ "but received "
+									+ proportion
+									+ "."
+					);
+				}
+
+				return;
+
+			case ALL:
+				return;
+
+			default:
+				throw new IllegalStateException(
+						"Unsupported dimension-selection strategy: "
+								+ AppContext.dimension_selection_strategy
+				);
 		}
 	}
 
@@ -492,6 +597,21 @@ public class PFApplication {
 					case "-shuffle":
 						AppContext.shuffle_dataset = Boolean.parseBoolean(options[1]);
 						break;
+					case "-subsample_dimensions":
+						AppContext.subsample_dimensions = Boolean.parseBoolean(options[1]);
+						break;
+
+					case "-dimension_selection_strategy":
+						AppContext.dimension_selection_strategy = parseDimensionSelectionStrategy(options[1]);
+						break;
+
+					case "-dimension_selection_count":
+						AppContext.dimension_selection_count = Integer.parseInt(options[1]);
+						break;
+
+					case "-dimension_selection_proportion":
+						AppContext.dimension_selection_proportion = Double.parseDouble(options[1]);
+						break;
 //				case "-jvmwarmup":	//TODO
 //					AppContext.warmup_java = Boolean.parseBoolean(options[1]);
 //					break;
@@ -791,6 +911,8 @@ public class PFApplication {
 						throw new Exception("Invalid Commandline Arguments");
 				}
 			}
+
+			validateDimensionSelectionConfiguration();
 
 			if (imputerType !=null) {
 				switch (imputerType) {

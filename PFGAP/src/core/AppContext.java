@@ -17,6 +17,7 @@ import imputation.initial.MeanImpute;
 import preprocessing.standardization.StandardizationConfig;
 import preprocessing.standardization.StandardizationStats;
 import proximities.ProximityType;
+import trees.DimensionSelectionStrategy;
 
 /**
  *
@@ -185,6 +186,18 @@ public class AppContext {
 
 	public static StandardizationConfig standardizationConfig = StandardizationConfig.disabled();
 	public static StandardizationStats standardizationStats = null;
+
+	public static boolean subsample_dimensions =
+			false;
+
+	public static DimensionSelectionStrategy dimension_selection_strategy =
+			DimensionSelectionStrategy.ALL;
+
+	public static int dimension_selection_count =
+			1;
+
+	public static double dimension_selection_proportion =
+			1.0;
 
 	//static {
 	//	rand = new Random();

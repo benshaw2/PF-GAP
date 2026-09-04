@@ -78,7 +78,101 @@ def _proximity_type_arg(value):
             )
             
     return value
-    
+
+def _dimension_selection_strategy_arg(value):
+    if value is None:
+        return "ALL"
+
+    normalized = str(value).strip().upper()
+
+    aliases = {
+        "FIXED": "FIXED_COUNT",
+        "COUNT": "FIXED_COUNT",
+        "FIXED_COUNT": "FIXED_COUNT",
+        "PROPORTION": "PROPORTION",
+        "PROP": "PROPORTION",
+        "SQRT": "SQRT",
+        "LOG2": "LOG2",
+        "LOG_2": "LOG2",
+        "ALL": "ALL",
+    }
+
+    if normalized not in aliases:
+        raise ValueError(
+            "dimension_selection_strategy must be one of: "
+            "'all', 'sqrt', 'log2', 'fixed_count', or "
+            "'proportion'."
+        )
+
+    return aliases[normalized]
+
+def _validate_dimension_selection_options(
+    subsample_dimensions,
+    dimension_selection_strategy,
+    dimension_selection_count,
+    dimension_selection_proportion,
+):
+    strategy = _dimension_selection_strategy_arg(
+        dimension_selection_strategy
+    )
+
+    if not isinstance(subsample_dimensions, (bool, np.bool_)):
+        raise TypeError(
+            "subsample_dimensions must be a boolean."
+        )
+
+    if not subsample_dimensions or strategy == "ALL":
+        return strategy
+
+    if strategy == "FIXED_COUNT":
+        if (
+            isinstance(dimension_selection_count, bool)
+            or not isinstance(
+                dimension_selection_count,
+                (int, np.integer),
+            )
+        ):
+            raise TypeError(
+                "dimension_selection_count must be an integer "
+                "when dimension_selection_strategy='fixed_count'."
+            )
+
+        if dimension_selection_count < 1:
+            raise ValueError(
+                "dimension_selection_count must be positive."
+            )
+
+    if strategy == "PROPORTION":
+        if (
+            isinstance(dimension_selection_proportion, bool)
+            or not isinstance(
+                dimension_selection_proportion,
+                (int, float, np.integer, np.floating),
+            )
+        ):
+            raise TypeError(
+                "dimension_selection_proportion must be numeric "
+                "when dimension_selection_strategy='proportion'."
+            )
+
+        proportion = float(
+            dimension_selection_proportion
+        )
+
+        if not np.isfinite(proportion):
+            raise ValueError(
+                "dimension_selection_proportion must be finite."
+            )
+
+        if proportion <= 0.0 or proportion > 1.0:
+            raise ValueError(
+                "dimension_selection_proportion must be within "
+                "(0, 1]."
+            )
+
+    return strategy
+
+
 def _normalized_reader_type(value):
     if value is None:
         return None
@@ -142,6 +236,13 @@ def train(
     on_tree=True,
     max_depth=0,
     shuffle=False,
+    
+    # Node-level dimension subsampling
+    subsample_dimensions=False,
+    dimension_selection_strategy="all",
+    dimension_selection_count=1,
+    dimension_selection_proportion=1.0,
+    
     export=1,
     verbosity=1,
     file_has_header=False,
@@ -255,6 +356,15 @@ def train(
         return_imputed_training=return_imputed_training,
         return_imputed_testing=return_imputed_testing,
     )
+    
+    normalized_dimension_selection_strategy = (
+        _validate_dimension_selection_options(
+            subsample_dimensions=subsample_dimensions,
+            dimension_selection_strategy=dimension_selection_strategy,
+            dimension_selection_count=dimension_selection_count,
+            dimension_selection_proportion=dimension_selection_proportion,
+        )
+    )
         
     model_name = os.path.basename(os.path.normpath(str(model_name)))
 
@@ -273,6 +383,11 @@ def train(
         "-on_tree=" + _bool(on_tree),
         "-max_depth=" + str(max_depth),
         "-shuffle=" + _bool(shuffle),
+        
+        "-subsample_dimensions=" + _bool(subsample_dimensions),
+        "-dimension_selection_strategy=" + normalized_dimension_selection_strategy,
+        "-dimension_selection_count=" + str(dimension_selection_count),
+        "-dimension_selection_proportion=" + str(dimension_selection_proportion),
 
         "-export=" + str(export),
         "-verbosity=" + str(verbosity),

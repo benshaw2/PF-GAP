@@ -4,14 +4,14 @@ import core.AppContext;
 import core.contracts.ObjectDataset;
 import datasets.ListObjectDataset;
 import distance.DistanceMeasure;
+import distance.MEASURE;
 
 import java.io.IOException;
 import java.io.Serializable;
 //import java.util.ArrayList;
 //import java.util.Collections;
 //import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.CompletionException;
 //import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.IntStream;
@@ -83,6 +83,34 @@ public class Splitter
 	protected ListObjectDataset[] best_split;
 
 	protected ProximityTree.Node node;
+
+	/**
+	 * Purpose value used to derive deterministic node-level dimension-selection
+	 * randomness independently from candidate, exemplar, and tie-breaking
+	 * randomness.
+	 */
+	private static final int DIMENSION_SELECTION_PURPOSE =
+			0x44494D;
+
+	/**
+	 * Below this dimensionality, allocating a primitive permutation array is
+	 * inexpensive enough that partial Fisher-Yates sampling is preferred.
+	 */
+	private static final int DENSE_DIMENSION_SAMPLING_THRESHOLD =
+			4096;
+
+	/**
+	 * Selected realized dimensions for this split.
+	 *
+	 * <p>A null value means that every available dimension is used. Otherwise,
+	 * the array contains distinct, ascending dimension indices.</p>
+	 *
+	 * <p>The selection is generated once per node and shared by every candidate
+	 * evaluated at that node. It is serialized with the winning splitter so that
+	 * prediction and loaded-model evaluation reproduce the trained routing
+	 * behavior.</p>
+	 */
+	private int[] selectedDimensions;
 
 	public Splitter(
 			ProximityTree.Node node
@@ -455,7 +483,8 @@ public class Splitter
 					temp_distance_measure.findClosestResolvedNode(
 							resolvedQuery,
 							resolvedExemplars,
-							queryRandom
+							queryRandom,
+							selectedDimensions
 					);
 		}
 
@@ -558,7 +587,8 @@ public class Splitter
 									workerDistance.findClosestResolvedNode(
 											resolvedQuery,
 											resolvedExemplars,
-											queryRandom
+											queryRandom,
+											selectedDimensions
 									);
 						} catch (IOException
 								| InterruptedException e) {
@@ -752,7 +782,11 @@ public class Splitter
 	}
 
 	/**
-	 * Compatibility method accepting stored or eager inputs.
+	 * Compatibility branch-selection method using an explicitly supplied
+	 * distance measure and exemplar array.
+	 *
+	 * <p>The splitter's stored node-level dimension selection is applied to the
+	 * supplied distance calculation.</p>
 	 */
 	public int find_closest_branch(
 			Object query,
@@ -760,10 +794,25 @@ public class Splitter
 			Object[] candidateExemplars
 	) throws Exception {
 
+		if (distanceMeasure == null) {
+			throw new IllegalArgumentException(
+					"Distance measure cannot be null."
+			);
+		}
+
+		if (candidateExemplars == null
+				|| candidateExemplars.length == 0) {
+
+			throw new IllegalArgumentException(
+					"At least one candidate exemplar is required."
+			);
+		}
+
 		return distanceMeasure.find_closest_node(
 				query,
 				candidateExemplars,
 				true,
+				selectedDimensions,
 				node.tree.getDistance_file()
 		);
 	}
@@ -771,18 +820,32 @@ public class Splitter
 	/**
 	 * Compatibility branch-selection method for the winning splitter.
 	 *
-	 * <p>This method resolves the query and node exemplars for this one call.
-	 * A later prediction refactor should resolve each prediction query once at
-	 * the forest boundary and call findClosestBranchResolved().</p>
+	 * <p>The query and stored exemplars are resolved by DistanceMeasure, and the
+	 * node's trained dimension subset is applied to every comparison.</p>
 	 */
 	public int find_closest_branch(
 			Object query
 	) throws Exception {
 
+		if (distance_measure == null) {
+			throw new IllegalStateException(
+					"Splitter has no selected distance measure."
+			);
+		}
+
+		if (exemplars == null
+				|| exemplars.length == 0) {
+
+			throw new IllegalStateException(
+					"Splitter has no selected exemplars."
+			);
+		}
+
 		return distance_measure.find_closest_node(
 				query,
 				exemplars,
 				true,
+				selectedDimensions,
 				node.tree.getDistance_file()
 		);
 	}
@@ -819,7 +882,8 @@ public class Splitter
 		return distance_measure.findClosestResolvedNode(
 				resolvedQuery,
 				resolvedExemplars,
-				random
+				random,
+				selectedDimensions
 		);
 	}
 
@@ -913,7 +977,8 @@ public class Splitter
 					distance_measure.findClosestResolvedNode(
 							resolvedQuery,
 							resolvedExemplars,
-							queryRandom
+							queryRandom,
+							selectedDimensions
 					);
 		}
 
@@ -946,9 +1011,13 @@ public class Splitter
 		temp_exemplars =
 				null;
 
+		selectedDimensions = null;
+
 		if (data == null || data.size() < 2) {
 			return null;
 		}
+
+		initializeNodeDimensionSelection(data);
 
 		Map<Object, ListObjectDataset> dataPerClass =
 				AppContext.isRegressionMode()
@@ -1033,6 +1102,19 @@ public class Splitter
 		return best_split;
 	}
 
+	/**
+	 * Creates an independent distance evaluator for one candidate split and
+	 * selects that candidate's random distance parameters.
+	 *
+	 * <p>When distance selection occurs once per tree, the tree-level distance
+	 * object identifies the selected distance type but must not itself be stored
+	 * in a node splitter. Its parameter fields are mutable, so retaining the
+	 * shared tree object would allow later nodes to overwrite parameters selected
+	 * by earlier nodes.</p>
+	 *
+	 * <p>Every candidate therefore receives its own DistanceMeasure instance.
+	 * The winning candidate's independent instance is retained by this splitter.</p>
+	 */
 	private DistanceMeasure selectDistanceMeasure(
 			ObjectDataset data
 	) throws Exception {
@@ -1060,32 +1142,55 @@ public class Splitter
 								)
 						);
 			} else {
+				if (node.tree.tree_distance_measure == null) {
+					throw new IllegalStateException(
+							"The tree-level distance measure has not been "
+									+ "initialized."
+					);
+				}
+
+				/*
+				 * Do not return the mutable tree-level object directly.
+				 * Each candidate and winning splitter must own independent
+				 * parameter state.
+				 */
 				selected =
-						node.tree.tree_distance_measure;
+						node.tree.tree_distance_measure
+								.copyForEvaluation();
 			}
 		} else {
 			if (AppContext.random_dm_per_node) {
+				MEASURE[] chosenDistances =
+						node.tree.getChosen_distances();
+
 				int selectedIndex =
 						AppContext.getRand()
 								.nextInt(
-										node.tree
-												.getChosen_distances()
-												.length
+										chosenDistances.length
 								);
 
 				selected =
 						new DistanceMeasure(
-								node.tree
-										.getChosen_distances()[
-										selectedIndex
-										],
+								chosenDistances[selectedIndex],
 								AppContext.Descriptors.get(
 										selectedIndex
 								)
 						);
 			} else {
+				if (node.tree.tree_distance_measure == null) {
+					throw new IllegalStateException(
+							"The tree-level distance measure has not been "
+									+ "initialized."
+					);
+				}
+
+				/*
+				 * The tree chooses the distance type once, but each candidate
+				 * still requires independent randomized parameter state.
+				 */
 				selected =
-						node.tree.tree_distance_measure;
+						node.tree.tree_distance_measure
+								.copyForEvaluation();
 			}
 		}
 
@@ -1183,5 +1288,455 @@ public class Splitter
 		);
 
 		return selected;
+	}
+
+	/**
+	 * Selects the realized dimensions shared by every candidate at this node.
+	 *
+	 * <p>When dimension subsampling is disabled, the configured strategy is ALL,
+	 * or the requested count includes every available dimension, the stored
+	 * selection remains null. Null is the all-dimensions fast path.</p>
+	 *
+	 * <p>For eager data, resolving the representative instance returns the same
+	 * object. For lazy data, exactly one representative instance is materialized
+	 * to determine the realized dimensionality.</p>
+	 */
+	private void initializeNodeDimensionSelection(
+			ObjectDataset data
+	) throws Exception {
+
+		if (!AppContext.subsample_dimensions
+				|| AppContext.dimension_selection_strategy
+				== DimensionSelectionStrategy.ALL) {
+
+			selectedDimensions =
+					null;
+
+			return;
+		}
+
+		Object storedRepresentative =
+				data.get_series(
+						0
+				);
+
+		if (storedRepresentative == null) {
+			throw new IllegalStateException(
+					"Cannot determine selectable dimensionality from a null "
+							+ "node instance."
+			);
+		}
+
+		/*
+		 * Use a short-lived wrapper only to apply the established eager/lazy
+		 * materialization contract. No distance is computed.
+		 *
+		 * This avoids depending on whichever candidate distance is selected
+		 * later, since all candidates must share the same node-level subset.
+		 */
+		Object resolvedRepresentative =
+				resolveDimensionRepresentative(
+						storedRepresentative
+				);
+
+		int dimensionCount =
+				selectableDimensionCountOf(
+						resolvedRepresentative
+				);
+
+		int selectedCount =
+				resolveSelectedDimensionCount(
+						dimensionCount
+				);
+
+		if (selectedCount >= dimensionCount) {
+			selectedDimensions =
+					null;
+
+			return;
+		}
+
+		Random selectionRandom =
+				new Random(
+						node.tree.deriveSeed(
+								node.node_id,
+								DIMENSION_SELECTION_PURPOSE
+						)
+				);
+
+		selectedDimensions =
+				sampleDistinctDimensions(
+						dimensionCount,
+						selectedCount,
+						selectionRandom
+				);
+	}
+
+	/**
+	 * Resolves one representative instance for dimensionality discovery.
+	 */
+	private static Object resolveDimensionRepresentative(
+			Object storedRepresentative
+	) {
+		if (storedRepresentative
+				instanceof datasets.readers.lazy.LazySeriesRef reference) {
+
+			return AppContext
+					.getLazySeriesReader(
+							reference.getReaderKey()
+					)
+					.read(
+							reference
+					);
+		}
+
+		return storedRepresentative;
+	}
+
+	/**
+	 * Returns the number of dimensions eligible for node-level random selection.
+	 *
+	 * <p>For one-dimensional arrays, each position is interpreted as a tabular
+	 * feature. For two-dimensional arrays, the outer position is interpreted as
+	 * a multivariate channel.</p>
+	 *
+	 * <p>Univariate time-point subsampling is not distinguished automatically.
+	 * Users should not enable dimension subsampling for ordinary univariate time
+	 * series in this initial implementation.</p>
+	 */
+	private static int selectableDimensionCountOf(
+			Object resolvedInstance
+	) {
+		int dimensionCount;
+
+		if (resolvedInstance instanceof double[] values) {
+			dimensionCount =
+					values.length;
+		} else if (resolvedInstance instanceof Double[] values) {
+			dimensionCount =
+					values.length;
+		} else if (resolvedInstance instanceof double[][] values) {
+			dimensionCount =
+					values.length;
+		} else if (resolvedInstance instanceof Double[][] values) {
+			dimensionCount =
+					values.length;
+		} else if (resolvedInstance instanceof Object[][] values) {
+			dimensionCount =
+					values.length;
+		} else if (resolvedInstance instanceof Object[] values) {
+			dimensionCount = values.length;
+		} else {
+			throw new UnsupportedOperationException(
+					"Node-level dimension subsampling is unsupported for "
+							+ "instance representation "
+							+ resolvedInstance.getClass().getTypeName()
+							+ ". Expected double[], Double[], double[][], "
+							+ "Double[][], Object[][], or Object[]."
+			);
+		}
+
+		if (dimensionCount < 1) {
+			throw new IllegalArgumentException(
+					"Dimension subsampling requires at least one available "
+							+ "dimension."
+			);
+		}
+
+		return dimensionCount;
+	}
+
+	/**
+	 * Resolves the configured number of dimensions to select.
+	 */
+	private static int resolveSelectedDimensionCount(
+			int dimensionCount
+	) {
+		DimensionSelectionStrategy strategy =
+				AppContext.dimension_selection_strategy;
+
+		if (strategy == null) {
+			throw new IllegalStateException(
+					"dimension_selection_strategy cannot be null when "
+							+ "dimension subsampling is enabled."
+			);
+		}
+
+		int selectedCount;
+
+		switch (strategy) {
+			case ALL:
+				selectedCount =
+						dimensionCount;
+
+				break;
+
+			case SQRT:
+				selectedCount =
+						(int) Math.ceil(
+								Math.sqrt(
+										dimensionCount
+								)
+						);
+
+				break;
+
+			case LOG2:
+				/*
+				 * Computes floor(log2(d)) + 1 using integer operations.
+				 */
+				selectedCount =
+						Integer.SIZE
+								- Integer.numberOfLeadingZeros(
+								dimensionCount
+						);
+
+				break;
+
+			case FIXED_COUNT:
+				if (AppContext.dimension_selection_count < 1) {
+					throw new IllegalArgumentException(
+							"dimension_selection_count must be positive for "
+									+ "FIXED_COUNT dimension selection, but received "
+									+ AppContext.dimension_selection_count
+									+ "."
+					);
+				}
+
+				selectedCount =
+						AppContext.dimension_selection_count;
+
+				break;
+
+			case PROPORTION:
+				double proportion =
+						AppContext.dimension_selection_proportion;
+
+				if (!Double.isFinite(
+						proportion
+				)
+						|| proportion <= 0.0
+						|| proportion > 1.0) {
+
+					throw new IllegalArgumentException(
+							"dimension_selection_proportion must be finite and "
+									+ "within (0, 1], but received "
+									+ proportion
+									+ "."
+					);
+				}
+
+				selectedCount =
+						(int) Math.ceil(
+								proportion
+										* dimensionCount
+						);
+
+				break;
+
+			default:
+				throw new IllegalStateException(
+						"Unsupported dimension-selection strategy: "
+								+ strategy
+				);
+		}
+
+		return Math.max(
+				1,
+				Math.min(
+						dimensionCount,
+						selectedCount
+				)
+		);
+	}
+
+	/**
+	 * Samples distinct sorted dimension indices without replacement.
+	 *
+	 * <p>A primitive partial Fisher-Yates shuffle is used when dimensionality is
+	 * moderate or the requested selection is dense. Floyd sampling is used when
+	 * dimensionality is large and the requested selection is sparse, avoiding an
+	 * O(d) temporary array.</p>
+	 */
+	private static int[] sampleDistinctDimensions(
+			int dimensionCount,
+			int selectedCount,
+			Random random
+	) {
+		if (dimensionCount < 1) {
+			throw new IllegalArgumentException(
+					"dimensionCount must be positive."
+			);
+		}
+
+		if (selectedCount < 1
+				|| selectedCount > dimensionCount) {
+
+			throw new IllegalArgumentException(
+					"selectedCount must be within [1, dimensionCount]. "
+							+ "Received selectedCount="
+							+ selectedCount
+							+ " and dimensionCount="
+							+ dimensionCount
+							+ "."
+			);
+		}
+
+		if (selectedCount == dimensionCount) {
+			return null;
+		}
+
+		if (dimensionCount
+				<= DENSE_DIMENSION_SAMPLING_THRESHOLD
+				|| (long) selectedCount * 4L
+				>= dimensionCount) {
+
+			return sampleDimensionsByPartialShuffle(
+					dimensionCount,
+					selectedCount,
+					random
+			);
+		}
+
+		return sampleDimensionsByFloyd(
+				dimensionCount,
+				selectedCount,
+				random
+		);
+	}
+
+	/**
+	 * Samples dimensions using a primitive partial Fisher-Yates shuffle.
+	 */
+	private static int[] sampleDimensionsByPartialShuffle(
+			int dimensionCount,
+			int selectedCount,
+			Random random
+	) {
+		int[] available =
+				new int[dimensionCount];
+
+		for (int dimension = 0;
+			 dimension < dimensionCount;
+			 dimension++) {
+
+			available[dimension] =
+					dimension;
+		}
+
+		for (int output = 0;
+			 output < selectedCount;
+			 output++) {
+
+			int swapIndex =
+					output
+							+ random.nextInt(
+							dimensionCount - output
+					);
+
+			int temporary =
+					available[output];
+
+			available[output] =
+					available[swapIndex];
+
+			available[swapIndex] =
+					temporary;
+		}
+
+		int[] selected =
+				Arrays.copyOf(
+						available,
+						selectedCount
+				);
+
+		Arrays.sort(
+				selected
+		);
+
+		return selected;
+	}
+
+	/**
+	 * Samples dimensions with Floyd's algorithm.
+	 *
+	 * <p>This path uses O(k) expected temporary storage rather than allocating an
+	 * array of length d. It is reserved for the sparse high-dimensional case,
+	 * where avoiding the O(d) temporary array outweighs boxed-set overhead.</p>
+	 */
+	private static int[] sampleDimensionsByFloyd(
+			int dimensionCount,
+			int selectedCount,
+			Random random
+	) {
+		int initialCapacity =
+				Math.max(
+						16,
+						(int) Math.ceil(
+								selectedCount / 0.75
+						)
+				);
+
+		Set<Integer> selectedSet =
+				new HashSet<>(
+						initialCapacity
+				);
+
+		for (int upper = dimensionCount - selectedCount;
+			 upper < dimensionCount;
+			 upper++) {
+
+			int candidate =
+					random.nextInt(
+							upper + 1
+					);
+
+			if (!selectedSet.add(
+					candidate
+			)) {
+				selectedSet.add(
+						upper
+				);
+			}
+		}
+
+		if (selectedSet.size() != selectedCount) {
+			throw new IllegalStateException(
+					"Dimension sampler produced "
+							+ selectedSet.size()
+							+ " selections; expected "
+							+ selectedCount
+							+ "."
+			);
+		}
+
+		int[] selected =
+				new int[selectedCount];
+
+		int output =
+				0;
+
+		for (int dimension : selectedSet) {
+			selected[output++] =
+					dimension;
+		}
+
+		Arrays.sort(
+				selected
+		);
+
+		return selected;
+	}
+
+	/**
+	 * Returns the node's selected realized dimensions.
+	 *
+	 * @return a defensive copy of the sorted selected indices, or null when the
+	 *         splitter uses every available dimension
+	 */
+	public int[] getSelectedDimensions() {
+		return selectedDimensions == null
+				? null
+				: selectedDimensions.clone();
 	}
 }
