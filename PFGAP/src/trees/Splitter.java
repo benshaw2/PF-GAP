@@ -1528,8 +1528,25 @@ public class Splitter
 			}
 		}
 
+		/*private void add(int branch, double distance, int weight) {
+			checkBranchIndex(branch);
+			branches[branch].add(distance, weight);
+		}*/
+
 		private void add(int branch, double distance, int weight) {
 			checkBranchIndex(branch);
+
+			if (!Double.isFinite(distance) || distance < 0.0) {
+				throw new IllegalStateException(
+						"Distance-based OOD scoring requires finite, nonnegative "
+								+ "winning distances, but received "
+								+ distance
+								+ " for branch "
+								+ branch
+								+ "."
+				);
+			}
+
 			branches[branch].add(distance, weight);
 		}
 

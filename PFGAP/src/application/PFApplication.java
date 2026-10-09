@@ -906,6 +906,9 @@ public class PFApplication {
 						String[] contents_strings = temp_strings_rm.split(","); // Splits by ","
 						AppContext.MissingStrings = new HashSet<>(Arrays.asList(contents_strings));
 						break;
+					case "-early_abandon_distances":
+						AppContext.early_abandon_distances = Boolean.parseBoolean(options[1]);
+						break;
 					case "-distances":
 						String temp = options[1];
 						String temp_rm = temp.substring(1, temp.length() - 1); // Removes '[' and ']'

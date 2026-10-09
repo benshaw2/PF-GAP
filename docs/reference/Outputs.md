@@ -218,10 +218,12 @@ A vote-proportion field can contain delimiters of its own, so normal CSV quoting
 ### OOD fields
 
 - `ood_score_type`: current scorer identifier, such as `relative_support_exceedance`.
-- `ood_mean`: mean OOD score across contributing trees.
+- `ood_mean`: mean bounded OOD score across contributing trees. For `relative_support_exceedance`, available tree scores lie in `[0, 1]`; higher values indicate stronger exceedance and are not calibrated probabilities.
 - `ood_standard_deviation`: standard deviation across available tree-level OOD scores.
 - `ood_available_tree_count`: number of trees that produced an available OOD score.
 - `ood_total_tree_count`: total number of trees considered.
+
+Relative support exceedance requires finite, nonnegative winning distances. Disable `early_abandon_distances` when diagnosing non-finite behavior.
 
 OOD-only output is valid. Prediction fields may be empty when no enhanced prediction details were requested.
 
@@ -419,7 +421,7 @@ Complete imputed datasets contain both originally observed and final imputed val
 
 Exact filenames and layouts therefore depend on the selected reader/writer pair. See [Writers](../data/Writers.md).
 
-## Imputed-only Matrix Market output
+## Imputed-only coordinate output
 
 Request only final values at originally missing coordinates with:
 
@@ -428,21 +430,23 @@ return_imputed_training_csr=True
 return_imputed_testing_csr=True
 ```
 
-Default direct-Java filenames are:
+The option names retain `csr` for compatibility, but the format depends on logical data rank.
+
+Default base filenames are:
 
 ```text
-training_imputed_values.mtx
-testing_imputed_values.mtx
+training_imputed_values
+testing_imputed_values
 ```
 
-Custom paths are configured with:
+PFGAP replaces the final extension when writing:
 
-```python
-training_imputed_csr_file="../output/training_imputed_values.mtx"
-testing_imputed_csr_file="../output/testing_imputed_values.mtx"
-```
+- tabular or univariate data uses Matrix Market coordinate `.mtx`, with `(instance, feature-or-time, value)` entries;
+- multivariate data uses sparse tensor coordinate `.tns`, with `(instance, dimension, time, value)` entries.
 
-The file uses Matrix Market coordinate format. Unlike sparse proximity storage, imputed-only output permits exact-zero coordinate entries because a zero final value at an originally missing coordinate is meaningful.
+Multivariate output bypasses CSR and does not flatten dimension and time into an offset column. The `.tns` shape comment records the maximum envelope and supports unequal-length or ragged source data when applied to the corresponding original dataset.
+
+Both formats retain exact-zero entries. They are imputed-only sparse patches, not complete datasets. Complete imputed datasets continue to use reader-matched classes in `datasets.writers`.
 
 See [Imputed-Only Output](Imputed_Only_Output.md).
 
@@ -648,7 +652,7 @@ The artifacts map can reference:
 - test-to-training proximities;
 - saved models;
 - complete imputed datasets;
-- imputed-only Matrix Market files; and
+- imputed-only `.mtx` or `.tns` coordinate files; and
 - standardization statistics.
 
 Artifact keys and paths are nonblank strings.
@@ -731,7 +735,7 @@ A boxed null numeric value is written as an empty field.
 
 ## File creation and replacement
 
-Current CSV, JSON, and Matrix Market writers:
+Current CSV, JSON, Matrix Market, and sparse tensor writers:
 
 - normalize output paths;
 - create missing parent directories;

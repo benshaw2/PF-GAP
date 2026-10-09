@@ -136,7 +136,7 @@ public final class EvaluationRepetitionRunner {
                 datasets.testingStandardizationStates()
         );
 
-        writeImputedOnlyMatrixMarketWhenRequested(
+        writeImputedOnlyWhenRequested(
                 testingData,
                 datasets.testingStandardizationStates(),
                 repetition,
@@ -283,7 +283,7 @@ public final class EvaluationRepetitionRunner {
      * <p>The AppContext fields used here are added with the CLI wiring:
      * {@code output_test_imputed_csr} and {@code test_imputed_csr_file}.</p>
      */
-    private void writeImputedOnlyMatrixMarketWhenRequested(
+    private void writeImputedOnlyWhenRequested(
             ListObjectDataset testingData,
             List<PerSeriesStandardizationState> standardizationStates,
             int repetition,
@@ -296,15 +296,15 @@ public final class EvaluationRepetitionRunner {
         MissingIndices missing = Objects.requireNonNull(
                 testingData.getMissingIndices(),
                 "Testing MissingIndices cannot be null when imputed-only "
-                        + "CSR output is requested."
+                        + "output is requested."
         );
         String configuredName = AppContext.test_imputed_csr_file;
         String fileName = configuredName == null || configuredName.isBlank()
-                ? "testing_imputed_values.mtx"
+                ? "testing_imputed_values"
                 : configuredName.trim();
         Path path = artifactPaths.resolveRepeated(fileName, repetition);
 
-        Path written = outputCoordinator.writeImputedValuesMatrixMarket(
+        Path written = outputCoordinator.writeImputedValues(
                 testingData,
                 missing,
                 standardizationStates,

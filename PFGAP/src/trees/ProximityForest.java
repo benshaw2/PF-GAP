@@ -435,8 +435,7 @@ public class ProximityForest implements Serializable {
     }
 
     /**
-     * Calculates OOD scores for a dataset using the default parameters of the
-     * selected scoring method.
+     * Calculates OOD scores for a dataset using the selected scoring method.
      *
      * <p>This operation is independent of ordinary prediction output and does
      * not modify leaf TestIndices. Queries are materialized once at the forest
@@ -448,104 +447,74 @@ public class ProximityForest implements Serializable {
     ) throws Exception {
         try (ParallelRuntime runtime =
                      new ParallelRuntime(AppContext.num_workers)) {
-            return scoreOOD(
-                    data,
-                    scoreType,
-                    RelativeSupportExceedanceOODScorer
-                            .DEFAULT_RELATIVE_SCALE_FLOOR,
-                    RelativeSupportExceedanceOODScorer
-                            .DEFAULT_INFINITY_SIGMA_MULTIPLIER,
-                    runtime
-            );
+            return scoreOOD(data, scoreType, runtime);
         }
     }
 
     /**
-     * Calculates OOD scores for every supplied query.
-     *
-     * <p>For multiple queries, query indices are exposed as parallel work and
-     * each resolved query traverses all trees sequentially. For one query, tree
-     * indices are exposed as parallel work. This mirrors ordinary forest
-     * evaluation and avoids nested parallel traversal.</p>
+     * Calculates OOD scores for every supplied query using the supplied bounded
+     * runtime.
      */
     public ForestOODScore[] scoreOOD(
             ListObjectDataset data,
             OODScoreType scoreType,
-            double relativeScaleFloor,
-            double infinitySigmaMultiplier,
             ParallelRuntime runtime
     ) throws Exception {
         Objects.requireNonNull(data, "OOD evaluation data cannot be null.");
         Objects.requireNonNull(scoreType, "OOD score type cannot be null.");
         Objects.requireNonNull(runtime, "ParallelRuntime cannot be null.");
-        validateOODParameters(
-                scoreType,
-                relativeScaleFloor,
-                infinitySigmaMultiplier
-        );
-
         requireSplitDistanceOODSupport();
+
         ForestOODScore[] scores = new ForestOODScore[data.size()];
         if (data.size() > 1 && runtime.isParallel()) {
             runtime.forRange(
                     0,
                     data.size(),
                     MINIMUM_PREDICTION_RANGE_SIZE,
-                    testIndex -> scores[testIndex] = scoreOneOODSequentialTrees(
-                            resolvePredictionQuery(data.get_series(testIndex)),
-                            testIndex,
-                            scoreType,
-                            relativeScaleFloor,
-                            infinitySigmaMultiplier
-                    )
+                    testIndex -> scores[testIndex] =
+                            scoreOneOODSequentialTrees(
+                                    resolvePredictionQuery(
+                                            data.get_series(testIndex)
+                                    ),
+                                    testIndex,
+                                    scoreType
+                            )
             );
             return scores;
         }
 
         for (int testIndex = 0; testIndex < data.size(); testIndex++) {
-            Object resolvedQuery = resolvePredictionQuery(
-                    data.get_series(testIndex)
-            );
             scores[testIndex] = scoreOneOOD(
-                    resolvedQuery,
+                    resolvePredictionQuery(data.get_series(testIndex)),
                     testIndex,
                     scoreType,
-                    relativeScaleFloor,
-                    infinitySigmaMultiplier,
                     runtime
             );
         }
         return scores;
     }
 
-    /** Calculates one forest OOD score with default scorer parameters. */
+    /** Calculates one forest OOD score. */
     public ForestOODScore scoreOOD(
             Object query,
             int index,
             OODScoreType scoreType
     ) throws Exception {
-        Object resolvedQuery = resolvePredictionQuery(query);
         requireSplitDistanceOODSupport();
         return scoreOneOODSequentialTrees(
-                resolvedQuery,
+                resolvePredictionQuery(query),
                 index,
                 Objects.requireNonNull(
                         scoreType,
                         "OOD score type cannot be null."
-                ),
-                RelativeSupportExceedanceOODScorer
-                        .DEFAULT_RELATIVE_SCALE_FLOOR,
-                RelativeSupportExceedanceOODScorer
-                        .DEFAULT_INFINITY_SIGMA_MULTIPLIER
+                )
         );
     }
 
     private ForestOODScore scoreOneOODSequentialTrees(
             Object resolvedQuery,
             int testIndex,
-            OODScoreType scoreType,
-            double relativeScaleFloor,
-            double infinitySigmaMultiplier
+            OODScoreType scoreType
     ) throws Exception {
         OODScoreResult[] treeScores = new OODScoreResult[trees.length];
         for (int treeIndex = 0; treeIndex < trees.length; treeIndex++) {
@@ -553,9 +522,7 @@ public class ProximityForest implements Serializable {
                     resolvedQuery,
                     testIndex,
                     treeIndex,
-                    scoreType,
-                    relativeScaleFloor,
-                    infinitySigmaMultiplier
+                    scoreType
             );
         }
         return aggregateTreeOODScores(scoreType, treeScores);
@@ -565,8 +532,6 @@ public class ProximityForest implements Serializable {
             Object resolvedQuery,
             int testIndex,
             OODScoreType scoreType,
-            double relativeScaleFloor,
-            double infinitySigmaMultiplier,
             ParallelRuntime runtime
     ) throws Exception {
         OODScoreResult[] treeScores = new OODScoreResult[trees.length];
@@ -578,9 +543,7 @@ public class ProximityForest implements Serializable {
                         resolvedQuery,
                         testIndex,
                         treeIndex,
-                        scoreType,
-                        relativeScaleFloor,
-                        infinitySigmaMultiplier
+                        scoreType
                 )
         );
         return aggregateTreeOODScores(scoreType, treeScores);
@@ -590,15 +553,9 @@ public class ProximityForest implements Serializable {
             Object resolvedQuery,
             int testIndex,
             int treeIndex,
-            OODScoreType scoreType,
-            double relativeScaleFloor,
-            double infinitySigmaMultiplier
+            OODScoreType scoreType
     ) throws Exception {
-        PathOODScorer scorer = createOODScorer(
-                scoreType,
-                relativeScaleFloor,
-                infinitySigmaMultiplier
-        );
+        PathOODScorer scorer = createOODScorer(scoreType);
         trees[treeIndex].findLeafResolved(
                 resolvedQuery,
                 predictionRandom(testIndex, treeIndex),
@@ -608,29 +565,15 @@ public class ProximityForest implements Serializable {
     }
 
     private static PathOODScorer createOODScorer(
-            OODScoreType scoreType,
-            double relativeScaleFloor,
-            double infinitySigmaMultiplier
+            OODScoreType scoreType
     ) {
-        return switch (scoreType) {
-            case RELATIVE_SUPPORT_EXCEEDANCE ->
-                    new RelativeSupportExceedanceOODScorer(
-                            relativeScaleFloor,
-                            infinitySigmaMultiplier
-                    );
-        };
-    }
-
-    private static void validateOODParameters(
-            OODScoreType scoreType,
-            double relativeScaleFloor,
-            double infinitySigmaMultiplier
-    ) {
-        createOODScorer(
+        return switch (Objects.requireNonNull(
                 scoreType,
-                relativeScaleFloor,
-                infinitySigmaMultiplier
-        );
+                "OOD score type cannot be null."
+        )) {
+            case RELATIVE_SUPPORT_EXCEEDANCE ->
+                    new RelativeSupportExceedanceOODScorer();
+        };
     }
 
     private static ForestOODScore aggregateTreeOODScores(
@@ -987,9 +930,7 @@ public class ProximityForest implements Serializable {
 
         if (options.includeOOD()) {
             PathOODScorer scorer = createOODScorer(
-                    options.oodScoreType(),
-                    options.relativeScaleFloor(),
-                    options.infinitySigmaMultiplier()
+                    options.oodScoreType()
             );
             leaf = trees[treeIndex].findLeafResolved(
                     resolvedQuery,
@@ -1035,59 +976,59 @@ public class ProximityForest implements Serializable {
                     summarizeNumericPredictions(treePredictions);
             return options.includeOOD()
                     ? ForestPredictionResult.regressionWithOOD(
-                            prediction,
-                            summary.mean(),
-                            summary.standardDeviation(),
-                            summary.count(),
-                            ood.scoreType(),
-                            ood.mean(),
-                            ood.standardDeviation(),
-                            ood.availableTreeCount(),
-                            ood.totalTreeCount()
-                    )
+                    prediction,
+                    summary.mean(),
+                    summary.standardDeviation(),
+                    summary.count(),
+                    ood.scoreType(),
+                    ood.mean(),
+                    ood.standardDeviation(),
+                    ood.availableTreeCount(),
+                    ood.totalTreeCount()
+            )
                     : ForestPredictionResult.regression(
-                            prediction,
-                            summary.mean(),
-                            summary.standardDeviation(),
-                            summary.count()
-                    );
+                    prediction,
+                    summary.mean(),
+                    summary.standardDeviation(),
+                    summary.count()
+            );
         }
 
         if (AppContext.isIsolationMode()) {
             return options.includeOOD()
                     ? ForestPredictionResult.isolationWithOOD(
-                            prediction,
-                            trees.length,
-                            ood.scoreType(),
-                            ood.mean(),
-                            ood.standardDeviation(),
-                            ood.availableTreeCount(),
-                            ood.totalTreeCount()
-                    )
+                    prediction,
+                    trees.length,
+                    ood.scoreType(),
+                    ood.mean(),
+                    ood.standardDeviation(),
+                    ood.availableTreeCount(),
+                    ood.totalTreeCount()
+            )
                     : ForestPredictionResult.isolation(
-                            prediction,
-                            trees.length
-                    );
+                    prediction,
+                    trees.length
+            );
         }
 
         Map<Object, Double> probabilities =
                 calculateClassVoteProbabilities(treePredictions);
         return options.includeOOD()
                 ? ForestPredictionResult.classificationWithOOD(
-                        prediction,
-                        probabilities,
-                        treePredictions.length,
-                        ood.scoreType(),
-                        ood.mean(),
-                        ood.standardDeviation(),
-                        ood.availableTreeCount(),
-                        ood.totalTreeCount()
-                )
+                prediction,
+                probabilities,
+                treePredictions.length,
+                ood.scoreType(),
+                ood.mean(),
+                ood.standardDeviation(),
+                ood.availableTreeCount(),
+                ood.totalTreeCount()
+        )
                 : ForestPredictionResult.classification(
-                        prediction,
-                        probabilities,
-                        treePredictions.length
-                );
+                prediction,
+                probabilities,
+                treePredictions.length
+        );
     }
 
     private static NumericPredictionSummary summarizeNumericPredictions(
@@ -1139,27 +1080,21 @@ public class ProximityForest implements Serializable {
      * Explicit controls for structured forest evaluation.
      *
      * <p>Use {@link #predictionsOnly()}, {@link #oodOnly(OODScoreType)}, or
-     * {@link #predictionsAndOOD(OODScoreType)} for the common cases. The full
-     * constructor permits scorer parameter overrides.</p>
+     * {@link #predictionsAndOOD(OODScoreType)} for the supported cases.</p>
      */
     public record EnhancedEvaluationOptions(
             boolean includePredictions,
             boolean includeOOD,
-            OODScoreType oodScoreType,
-            double relativeScaleFloor,
-            double infinitySigmaMultiplier
+            OODScoreType oodScoreType
     ) implements Serializable {
-
         @Serial
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
 
         public static EnhancedEvaluationOptions predictionsOnly() {
             return new EnhancedEvaluationOptions(
                     true,
                     false,
-                    null,
-                    Double.NaN,
-                    Double.NaN
+                    null
             );
         }
 
@@ -1186,26 +1121,22 @@ public class ProximityForest implements Serializable {
                     Objects.requireNonNull(
                             scoreType,
                             "OOD score type cannot be null."
-                    ),
-                    RelativeSupportExceedanceOODScorer
-                            .DEFAULT_RELATIVE_SCALE_FLOOR,
-                    RelativeSupportExceedanceOODScorer
-                            .DEFAULT_INFINITY_SIGMA_MULTIPLIER
+                    )
             );
         }
 
         private void validate() {
             if (!includePredictions && !includeOOD) {
                 throw new IllegalArgumentException(
-                        "Enhanced evaluation must request predictions, OOD scores, or both."
+                        "Enhanced evaluation must request predictions, "
+                                + "OOD scores, or both."
                 );
             }
             if (!includeOOD) {
-                if (oodScoreType != null
-                        || !Double.isNaN(relativeScaleFloor)
-                        || !Double.isNaN(infinitySigmaMultiplier)) {
+                if (oodScoreType != null) {
                     throw new IllegalArgumentException(
-                            "Prediction-only evaluation must not specify OOD settings."
+                            "Prediction-only evaluation must not specify "
+                                    + "an OOD score type."
                     );
                 }
                 return;
@@ -1214,11 +1145,7 @@ public class ProximityForest implements Serializable {
                     oodScoreType,
                     "OOD score type cannot be null when OOD output is requested."
             );
-            validateOODParameters(
-                    oodScoreType,
-                    relativeScaleFloor,
-                    infinitySigmaMultiplier
-            );
+            createOODScorer(oodScoreType);
         }
     }
 

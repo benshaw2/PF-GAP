@@ -166,6 +166,7 @@ Strategy-specific numeric values are ignored when subsampling is disabled or the
 | `distances` | `-distances` | `None` | `None` | Sequence, encoded list, or descriptors | Candidate forest distances. The helper encodes `None` as an empty list, which delegates to application behavior. |
 | `knn_distances` | `-knn_distances` | `None` | `None` | Distance sequence | Required when `initial_imputer="knn"`. |
 | `missing_proximity_distances` | `-missing_proximity_distances` | `None` | `None` | Missing-compatible distance sequence | Distances used for `proximity_first` initialization. |
+| `early_abandon_distances` | `-early_abandon_distances` | `True` | `True` | Boolean | Controls best-so-far early abandoning. When false, cutoff-aware distances receive positive infinity and should perform a complete calculation. Useful for diagnosing non-finite OOD distances. |
 
 Valid missing-proximity distances are:
 
@@ -231,12 +232,12 @@ KNN initialization uses five neighbors and requires at least one `knn_distances`
 |---|---|---:|---:|---|---|
 | `return_imputed_training` | `-impute_train` | `False` | Not exposed | Boolean | Requests a complete imputed training dataset and enables training imputation. |
 | `return_imputed_testing` | `-impute_test` | `False` | `False` | Boolean | Requests a complete imputed test dataset and enables test imputation. |
-| `return_imputed_training_csr` | `-output_train_imputed_csr` | `False` | Not exposed | Boolean | Requests imputed-only training output in Matrix Market `.mtx` form and enables training imputation. |
-| `return_imputed_testing_csr` | `-output_test_imputed_csr` | `False` | `False` | Boolean | Requests imputed-only test output in Matrix Market `.mtx` form and enables test imputation. |
+| `return_imputed_training_csr` | `-output_train_imputed_csr` | `False` | Not exposed | Boolean | Requests imputed-only training output and enables training imputation. One-dimensional data uses `.mtx`; multivariate data uses `.tns`. |
+| `return_imputed_testing_csr` | `-output_test_imputed_csr` | `False` | `False` | Boolean | Requests imputed-only test output and enables test imputation. One-dimensional data uses `.mtx`; multivariate data uses `.tns`. |
 | `training_imputed_csr_file` | `-train_imputed_csr_file` | `None` | Not exposed | Path or `None` | Output path for imputed-only training values. Java default: `training_imputed_values.mtx`. |
 | `testing_imputed_csr_file` | `-test_imputed_csr_file` | `None` | `None` | Path or `None` | Output path for imputed-only test values. Java default: `testing_imputed_values.mtx`. |
 
-The option names retain `csr`; the supported file output is Matrix Market `.mtx`. See [Imputed-Only Output](Imputed_Only_Output.md).
+The option names retain `csr` for compatibility. One-dimensional output uses `.mtx`; multivariate output bypasses CSR and uses `.tns`. See [Imputed-Only Output](Imputed_Only_Output.md).
 
 ### Lazy per-file Parquet restriction
 
@@ -286,7 +287,7 @@ Prediction, enhanced output, and OOD output are independent requests.
 | Python argument | Java option | Train default | Predict default | Type and accepted values | Description |
 |---|---|---:|---:|---|---|
 | `return_ood_scores` | `-return_ood_scores` | `False` | `False` | Boolean | Requests OOD output. It does not require enhanced prediction output. |
-| `ood_score_type` | `-ood_score_type` | `relative_support_exceedance` | Same | `relative_support_exceedance` | Selects the evaluation-time OOD scorer. |
+| `ood_score_type` | `-ood_score_type` | `relative_support_exceedance` | Same | `relative_support_exceedance` | Selects the bounded `[0, 1]` evaluation-time OOD scorer. Finite, nonnegative winning distances are required. |
 | `collect_split_distance_summaries` | `-collect_split_distance_summaries` | `False` | Not exposed | Boolean | Retains branch-local distance summaries during training so the model can support distance-based OOD scoring. |
 
 When `return_ood_scores=True` is passed to `train(...)`, the helper enables split-distance summary collection for same-run validation.

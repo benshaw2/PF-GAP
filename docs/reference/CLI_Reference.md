@@ -623,6 +623,15 @@ meta_type:path/to/file[:method]
 
 The referenced file must exist when the arguments are parsed. See [Custom Distances](../extensions/Custom_Distances.md).
 
+## `-early_abandon_distances`
+
+**Type:** Boolean
+**Default:** true
+
+Controls best-so-far early abandoning. When false, cutoff-aware distances receive positive infinity and should perform a complete calculation. This is useful for diagnosing distance implementations and non-finite OOD distances.
+
+Custom Java distances may support `compute(first, second, bestSoFar)`. Selected-dimension custom distances may support `compute(first, second, bestSoFar, selectedDimensions)`.
+
 ## `-knn_distances`
 
 **Type:** Bracketed distance list
@@ -798,26 +807,26 @@ Requests complete imputed test-data output.
 **Type:** Boolean
 **Default:** `false`
 
-Requests imputed-only training values in Matrix Market `.mtx` form. This also enables training imputation and missing-value handling.
+Requests imputed-only training values. One-dimensional data uses `.mtx`; multivariate data uses `.tns`. This also enables training imputation and missing-value handling.
 
 ## `-output_test_imputed_csr`
 
 **Type:** Boolean
 **Default:** `false`
 
-Requests imputed-only test values in Matrix Market `.mtx` form. This also enables test imputation and missing-value handling.
+Requests imputed-only test values. One-dimensional data uses `.mtx`; multivariate data uses `.tns`. This also enables test imputation and missing-value handling.
 
 ## `-train_imputed_csr_file`
 
 **Type:** Path or `None`
-**Default:** `training_imputed_values.mtx`
+**Default:** `training_imputed_values`
 
 Output path for imputed-only training values.
 
 ## `-test_imputed_csr_file`
 
 **Type:** Path or `None`
-**Default:** `testing_imputed_values.mtx`
+**Default:** `testing_imputed_values`
 
 Output path for imputed-only test values.
 
@@ -930,6 +939,8 @@ Current value:
 ```text
 relative_support_exceedance
 ```
+
+This scorer is bounded in `[0, 1]` and requires finite, nonnegative winning distances.
 
 ## `-collect_split_distance_summaries`
 
