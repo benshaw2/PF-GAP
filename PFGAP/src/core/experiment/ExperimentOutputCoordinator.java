@@ -276,7 +276,7 @@ public final class ExperimentOutputCoordinator {
             List<PerSeriesStandardizationState> states
     ) throws IOException {
         writeDataset(data, states, AppContext.getTrainingReaderType(),
-                Path.of(AppContext.output_dir + AppContext.training_file),
+                AppContext.output_dir, AppContext.training_file,
                 AppContext.impute_train, "training");
     }
 
@@ -291,7 +291,7 @@ public final class ExperimentOutputCoordinator {
             List<PerSeriesStandardizationState> states
     ) throws IOException {
         writeDataset(data, states, AppContext.getTestingReaderType(),
-                Path.of(AppContext.output_dir + AppContext.testing_file),
+                AppContext.output_dir, AppContext.testing_file,
                 AppContext.impute_test, "testing");
     }
 
@@ -404,14 +404,15 @@ public final class ExperimentOutputCoordinator {
             ListObjectDataset data,
             List<PerSeriesStandardizationState> states,
             ReaderType readerType,
-            Path path,
+            String path,
+            String filename,
             boolean requested,
             String role
     ) throws IOException {
         Objects.requireNonNull(data, role + " data cannot be null.");
         validateStates(data, states, role);
         if (!requested) return;
-        DatasetWriteOptions options = options(data, states, readerType, path);
+        DatasetWriteOptions options = options(data, states, readerType, Path.of(path + filename));
         DatasetWriter writer = DatasetWriterFactory.createFor(
                 readerType, data, options);
         writer.write(data, options);
